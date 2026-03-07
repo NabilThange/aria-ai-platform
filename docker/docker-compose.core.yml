@@ -1,0 +1,19 @@
+name: bytebot
+
+services:
+  bytebot-desktop:
+    # Build from custom Dockerfile with ARIA background
+    build:
+      context: ..
+      dockerfile: docker/bytebot-desktop.Dockerfile
+    # Use pre-built image (commented out - using custom build)
+    # image: ghcr.io/bytebot-ai/bytebot-desktop:edge
+    shm_size: "2g"
+    container_name: bytebot-desktop
+    restart: unless-stopped
+    hostname: computer
+    privileged: true
+    ports:
+      - "9990:9990" # bytebotd service & noVNC
+    environment:
+      - DISPLAY=:0
