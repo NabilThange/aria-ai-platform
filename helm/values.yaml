@@ -3,21 +3,21 @@ global:
   
 postgresql:
   enabled: true
-  fullnameOverride: "bytebot-postgresql"
+  fullnameOverride: "aria-postgresql"
   auth:
     username: postgres
     password: postgres
-    database: bytebotdb
+    database: ariadb
   service:
     port: 5432
   persistence:
     enabled: true
     size: 10Gi
 
-bytebot-desktop:
-  fullnameOverride: "bytebot-desktop"
+aria-desktop:
+  fullnameOverride: "aria-desktop"
   image:
-    repository: ghcr.io/bytebot-ai/bytebot-desktop
+    repository: ghcr.io/aria-ai/aria-desktop
     tag: edge
   service:
     type: ClusterIP
@@ -33,22 +33,22 @@ bytebot-desktop:
     enabled: true
     size: "2Gi"
 
-bytebot-agent:
-  fullnameOverride: "bytebot-agent"
+aria-agent:
+  fullnameOverride: "aria-agent"
   image:
-    repository: ghcr.io/bytebot-ai/bytebot-agent
+    repository: ghcr.io/aria-ai/aria-agent
     tag: edge
   service:
     type: ClusterIP
     port: 9991
   config:
-    bytebotDesktopUrl: "http://bytebot-desktop:9990"
+    ariaDesktopUrl: "http://aria-desktop:9990"
   postgresql:
     enabled: false
   externalDatabase:
-    host: "bytebot-postgresql"
+    host: "aria-postgresql"
     port: 5432
-    database: bytebotdb
+    database: ariadb
     username: postgres
     password: postgres
   # Legacy API key configuration (for backward compatibility)
@@ -82,17 +82,17 @@ bytebot-agent:
       memory: "1Gi"
       cpu: "500m"
 
-bytebot-ui:
-  fullnameOverride: "bytebot-ui"
+aria-ui:
+  fullnameOverride: "aria-ui"
   image:
-    repository: ghcr.io/bytebot-ai/bytebot-ui
+    repository: ghcr.io/aria-ai/aria-ui
     tag: edge
   service:
     type: ClusterIP
     port: 9992
   config:
-    agentBaseUrl: "http://bytebot-agent:9991"
-    desktopVncUrl: "http://bytebot-desktop:9990/websockify"
+    agentBaseUrl: "http://aria-agent:9991"
+    desktopVncUrl: "http://aria-desktop:9990/websockify"
   resources:
     limits:
       memory: "1Gi"
@@ -102,8 +102,8 @@ bytebot-ui:
       cpu: "250m"
 
 # LiteLLM proxy is disabled by default
-# Enable it by using -f values-proxy.yaml or --set bytebot-llm-proxy.enabled=true
-bytebot-llm-proxy:
+# Enable it by using -f values-proxy.yaml or --set aria-llm-proxy.enabled=true
+aria-llm-proxy:
   enabled: false
 
 ingress:
@@ -111,7 +111,7 @@ ingress:
   className: "nginx"
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
-  host: bytebot.example.com
+  host: aria.example.com
   tls:
     enabled: true
-    secretName: bytebot-tls
+    secretName: aria-tls

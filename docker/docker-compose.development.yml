@@ -1,47 +1,47 @@
-## docker-compose file that spins up a bytebot-desktop container
-## and a postgres container. bytebot-ui and bytebot-agent are not included
+## docker-compose file that spins up an aria-desktop container
+## and a postgres container. aria-ui and aria-agent are not included
 ## in this file, and can be run separately using npm, allowing for
 ## easier local development.
 
-name: bytebot
+name: aria
 
 services:
-  bytebot-desktop:
+  aria-desktop:
     # Build from source
     build:
       context: ../packages/
-      dockerfile: bytebotd/Dockerfile
-    # Use pre-built image
-    image: ghcr.io/bytebot-ai/bytebot-desktop:edge
+      dockerfile: ariad/Dockerfile
+    # Use pre-built image (commented out - build from source)
+    # image: ghcr.io/aria-ai/aria-desktop:edge
     shm_size: "2g"
-    container_name: bytebot-desktop
+    container_name: aria-desktop
     restart: unless-stopped
     hostname: computer
     privileged: true
     ports:
-      - "9990:9990" # bytebotd service & noVNC
+      - "9990:9990" # ariad service & noVNC
     environment:
       - DISPLAY=:0
     networks:
-      - bytebot-network
+      - aria-network
 
   postgres:
     image: postgres:16-alpine
-    container_name: bytebot-postgres
+    container_name: aria-postgres
     restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_USER=postgres
-      - POSTGRES_DB=bytebotdb
+      - POSTGRES_DB=ariadb
     networks:
-      - bytebot-network
+      - aria-network
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
 networks:
-  bytebot-network:
+  aria-network:
     driver: bridge
 
 volumes:

@@ -1,0 +1,15 @@
+apiVersion: v2
+name: aria-desktop
+description: A Helm chart for Bytebot Desktop service
+type: application
+version: 0.1.0
+appVersion: "edge"
+keywords:
+  - bytebot
+  - desktop
+  - vnc
+  - remote-desktop
+maintainers:
+  - name: Bytebot Team
+sources:
+  - https://github.com/aria-ai/bytebot

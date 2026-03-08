@@ -1,85 +1,85 @@
-name: bytebot
+name: aria
 
 services:
-  bytebot-desktop:
+  aria-desktop:
     # Build from source
     build:
       context: ../packages/
-      dockerfile: bytebotd/Dockerfile
-    # Use pre-built image
-    image: ghcr.io/bytebot-ai/bytebot-desktop:edge
+      dockerfile: ariad/Dockerfile
+    # Use pre-built image (commented out - build from source)
+    # image: ghcr.io/aria-ai/aria-desktop:edge
     shm_size: "2g"
-    container_name: bytebot-desktop
+    container_name: aria-desktop
     restart: unless-stopped
     hostname: computer
     privileged: true
     ports:
-      - "9990:9990" # bytebotd service & noVNC
+      - "9990:9990" # ariad service & noVNC
     environment:
       - DISPLAY=:0
     networks:
-      - bytebot-network
+      - aria-network
 
   postgres:
     image: postgres:16-alpine
-    container_name: bytebot-postgres
+    container_name: aria-postgres
     restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_USER=postgres
-      - POSTGRES_DB=bytebotdb
+      - POSTGRES_DB=ariadb
     networks:
-      - bytebot-network
+      - aria-network
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  bytebot-agent:
+  aria-agent:
     build:
       context: ../packages/
-      dockerfile: bytebot-agent/Dockerfile
+      dockerfile: aria-agent/Dockerfile
     # Use pre-built image
-    image: ghcr.io/bytebot-ai/bytebot-agent:edge
-    container_name: bytebot-agent
+    image: ghcr.io/aria-ai/aria-agent:edge
+    container_name: aria-agent
     restart: unless-stopped
     ports:
       - "9991:9991"
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/bytebotdb}
-      - BYTEBOT_DESKTOP_BASE_URL=${BYTEBOT_DESKTOP_BASE_URL:-http://bytebot-desktop:9990}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/ariadb}
+      - ARIA_DESKTOP_BASE_URL=${ARIA_DESKTOP_BASE_URL:-http://aria-desktop:9990}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
     depends_on:
       - postgres
     networks:
-      - bytebot-network
+      - aria-network
 
-  bytebot-ui:
+  aria-ui:
     build:
       context: ../packages/
-      dockerfile: bytebot-ui/Dockerfile
+      dockerfile: aria-ui/Dockerfile
       args:
-        - BYTEBOT_AGENT_BASE_URL=${BYTEBOT_AGENT_BASE_URL:-http://bytebot-agent:9991}
-        - BYTEBOT_DESKTOP_VNC_URL=${BYTEBOT_DESKTOP_VNC_URL:-http://bytebot-desktop:9990/websockify}
+        - ARIA_AGENT_BASE_URL=${ARIA_AGENT_BASE_URL:-http://aria-agent:9991}
+        - ARIA_DESKTOP_VNC_URL=${ARIA_DESKTOP_VNC_URL:-http://aria-desktop:9990/websockify}
     # Use pre-built image
-    image: ghcr.io/bytebot-ai/bytebot-ui:edge
-    container_name: bytebot-ui
+    image: ghcr.io/aria-ai/aria-ui:edge
+    container_name: aria-ui
     restart: unless-stopped
     ports:
       - "9992:9992"
     environment:
       - NODE_ENV=production
-      - BYTEBOT_AGENT_BASE_URL=${BYTEBOT_AGENT_BASE_URL:-http://bytebot-agent:9991}
-      - BYTEBOT_DESKTOP_VNC_URL=${BYTEBOT_DESKTOP_VNC_URL:-http://bytebot-desktop:9990/websockify}
+      - ARIA_AGENT_BASE_URL=${ARIA_AGENT_BASE_URL:-http://aria-agent:9991}
+      - ARIA_DESKTOP_VNC_URL=${ARIA_DESKTOP_VNC_URL:-http://aria-desktop:9990/websockify}
     depends_on:
-      - bytebot-agent
+      - aria-agent
     networks:
-      - bytebot-network
+      - aria-network
 
 networks:
-  bytebot-network:
+  aria-network:
     driver: bridge
 
 volumes:

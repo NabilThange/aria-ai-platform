@@ -1,7 +1,7 @@
 {
   "name": "@bytebot/shared",
   "version": "0.0.1",
-  "description": "Shared utilities and types for Bytebot packages",
+  "description": "Shared utilities and types for Aria packages",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "private": true,
