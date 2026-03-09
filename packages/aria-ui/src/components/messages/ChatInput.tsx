@@ -19,6 +19,8 @@ interface ChatInputProps {
   onFileUpload?: (files: FileWithBase64[]) => void;
   minLines?: number;
   placeholder?: string;
+  planningEnabled?: boolean;
+  onPlanningToggle?: (enabled: boolean) => void;
 }
 
 export function ChatInput({
@@ -29,6 +31,8 @@ export function ChatInput({
   onFileUpload,
   minLines = 1,
   placeholder = "Give Aria a task to work on...",
+  planningEnabled = false,
+  onPlanningToggle,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -159,6 +163,28 @@ export function ChatInput({
         className="hidden"
         accept="*/*"
       />
+      
+      {/* Planning Toggle */}
+      {onPlanningToggle && (
+        <div className="mb-2 flex items-center gap-2">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={planningEnabled}
+              onChange={(e) => onPlanningToggle(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-bytebot-bronze-dark-7 focus:ring-bytebot-bronze-dark-7"
+            />
+            <span className="text-sm text-bytebot-bronze-dark-7">
+              Enable Planning Mode
+            </span>
+          </label>
+          {planningEnabled && (
+            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
+              Plan first, then execute
+            </span>
+          )}
+        </div>
+      )}
       
       {errorMessage && (
         <div className="mb-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">

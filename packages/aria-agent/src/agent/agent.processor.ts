@@ -1,6 +1,6 @@
 import { TasksService } from '../tasks/tasks.service';
 import { MessagesService } from '../messages/messages.service';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import {
   Message,
   Role,
@@ -8,6 +8,7 @@ import {
   TaskPriority,
   TaskStatus,
   TaskType,
+  PlanStatus,
 } from '@prisma/client';
 import {
   isComputerToolUseContentBlock,
@@ -34,11 +35,12 @@ import {
   BytebotAgentResponse,
 } from './agent.types';
 import {
-  AGENT_SYSTEM_PROMPT,
+  getAgentSystemPrompt,
   SUMMARIZATION_SYSTEM_PROMPT,
 } from './agent.constants';
 import { SummariesService } from '../summaries/summaries.service';
 import { handleComputerToolUse } from './agent.computer-use';
+import { PlannerService } from '../planner/planner.service';
 
 @Injectable()
 export class AgentProcessor {
@@ -57,6 +59,8 @@ export class AgentProcessor {
     private readonly openRouterService: OpenRouterService,
     private readonly bytezService: BytezService,
     private readonly inputCaptureService: InputCaptureService,
+    @Inject(forwardRef(() => PlannerService))
+    private readonly plannerService: PlannerService,
   ) {
     this.services = {
       google: this.googleService,
@@ -111,12 +115,108 @@ export class AgentProcessor {
     await this.stopProcessing();
   }
 
-  processTask(taskId: string) {
+  @OnEvent('plan.approved')
+  async handlePlanApproved({ planId, taskId }: { planId: string; taskId: string }) {
+    this.logger.log(`\n========================================`);
+    this.logger.log(`PLAN APPROVED EVENT RECEIVED`);
+    this.logger.log(`Plan ID: ${planId}`);
+    this.logger.log(`Task ID: ${taskId}`);
+    this.logger.log(`========================================\n`);
+
+    // Start processing the task now that the plan is approved
+    if (!this.isProcessing) {
+      this.logger.log(`Agent is not currently processing, starting task execution`);
+      this.processTask(taskId);
+    } else {
+      this.logger.warn(`Agent is already processing task ${this.currentTaskId}, cannot start ${taskId}`);
+    }
+  }
+
+  async processTask(taskId: string) {
     this.logger.log(`Starting processing for task ID: ${taskId}`);
 
     if (this.isProcessing) {
       this.logger.warn('AgentProcessor is already processing another task');
       return;
+    }
+
+    // Check if task has planning enabled
+    const task = await this.tasksService.findById(taskId);
+    
+    if (task.planningEnabled) {
+      this.logger.log(`Task ${taskId} has planning enabled, checking for plan`);
+      
+      // Check if plan exists
+      const existingPlan = await this.plannerService.getPlanByTaskId(taskId);
+      
+      if (!existingPlan) {
+        // Create plan and keep task in PENDING status
+        this.logger.log(`Creating plan for task ${taskId}`);
+        try {
+          await this.plannerService.createPlan({
+            taskId,
+            taskDescription: task.description,
+            model: task.model as any,
+          });
+          
+          // Update task status back to PENDING to wait for plan approval
+          await this.tasksService.update(taskId, {
+            status: TaskStatus.PENDING,
+          });
+          
+          this.logger.log(`Plan created for task ${taskId}, waiting for approval`);
+          return; // Wait for plan approval before processing
+        } catch (error) {
+          this.logger.error(`Failed to create plan for task ${taskId}:`, error);
+          await this.tasksService.update(taskId, {
+            status: TaskStatus.FAILED,
+          });
+          return;
+        }
+      } else if (existingPlan.status === PlanStatus.PENDING) {
+        this.logger.log(`Plan exists for task ${taskId} but is pending approval`);
+        
+        // Update task status back to PENDING if it's not already
+        if (task.status !== TaskStatus.PENDING) {
+          await this.tasksService.update(taskId, {
+            status: TaskStatus.PENDING,
+          });
+        }
+        
+        return; // Wait for approval
+      } else if (existingPlan.status === PlanStatus.APPROVED || existingPlan.status === PlanStatus.EXECUTING) {
+        // Plan is approved, proceed with normal agent execution
+        // The agent will use the plan as context to guide its actions
+        this.logger.log(`Plan approved for task ${taskId}, proceeding with agent execution`);
+        // Continue to normal agent execution below
+      } else if (existingPlan.status === PlanStatus.PLANNING) {
+        this.logger.warn(`Plan for task ${taskId} is still being generated, waiting`);
+        return;
+      } else if (existingPlan.status === PlanStatus.FAILED) {
+        // Plan failed, mark task as failed
+        this.logger.log(`Plan failed for task ${taskId}, marking task as failed`);
+        await this.tasksService.update(taskId, {
+          status: TaskStatus.FAILED,
+        });
+        return;
+      } else if (existingPlan.status === PlanStatus.CANCELLED) {
+        // Plan cancelled, mark task as cancelled
+        this.logger.log(`Plan cancelled for task ${taskId}, marking task as cancelled`);
+        await this.tasksService.update(taskId, {
+          status: TaskStatus.CANCELLED,
+        });
+        return;
+      } else {
+        this.logger.warn(`Plan for task ${taskId} has unexpected status ${existingPlan.status}`);
+        return;
+      }
+    }
+
+    // Ensure task is in RUNNING status before proceeding
+    if (task.status !== TaskStatus.RUNNING) {
+      await this.tasksService.update(taskId, {
+        status: TaskStatus.RUNNING,
+      });
     }
 
     this.isProcessing = true;
@@ -198,8 +298,47 @@ export class AgentProcessor {
         return;
       }
 
+      // Check if task has an approved plan and inject it into the system prompt
+      let systemPrompt = getAgentSystemPrompt(); // Get fresh prompt with current date/time
+      if (task.planningEnabled) {
+        const plan = await this.plannerService.getPlanByTaskId(taskId);
+        if (plan && plan.status === PlanStatus.APPROVED && plan.selectedPathId) {
+          // Fetch full plan with paths and steps
+          const fullPlan = await this.plannerService.getPlanById(plan.id);
+          const selectedPath = (fullPlan as any).paths?.find((p: any) => p.id === plan.selectedPathId);
+          if (selectedPath) {
+            this.logger.log(`Injecting approved plan into system prompt for task ${taskId}`);
+            
+            // Build plan context
+            const planContext = `
+
+## APPROVED EXECUTION PLAN
+
+You have an approved execution plan for this task. Follow these steps:
+
+**Strategy:** ${selectedPath.strategy}
+**Estimated Duration:** ${selectedPath.estimatedDuration} seconds
+**Estimated Tokens:** ${selectedPath.estimatedTokens}
+
+**Steps to execute:**
+${selectedPath.steps.map((step: any, idx: number) => `
+${idx + 1}. ${step.action}
+   Description: ${step.description}
+   Type: ${step.type}
+   ${step.command ? `Command: ${step.command}` : ''}
+   ${step.verification ? `Verification: ${step.verification}` : ''}
+`).join('\n')}
+
+**IMPORTANT:** Execute these steps using your computer control tools. Take screenshots to verify each step. Mark the task as completed when all steps are done successfully.
+`;
+            
+            systemPrompt = getAgentSystemPrompt() + planContext;
+          }
+        }
+      }
+
       agentResponse = await service.generateMessage(
-        AGENT_SYSTEM_PROMPT,
+        systemPrompt,
         messages,
         model.name,
         true,

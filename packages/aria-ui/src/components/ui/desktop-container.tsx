@@ -13,6 +13,7 @@ interface DesktopContainerProps {
   viewOnly?: boolean;
   className?: string;
   status?: VirtualDesktopStatus;
+  mode?: "online" | "offline";
 }
 
 export const DesktopContainer: React.FC<DesktopContainerProps> = ({
@@ -21,6 +22,7 @@ export const DesktopContainer: React.FC<DesktopContainerProps> = ({
   viewOnly = false,
   className = "",
   status = "running",
+  mode = "online",
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -100,7 +102,7 @@ export const DesktopContainer: React.FC<DesktopContainerProps> = ({
               className="h-full w-full"
             />
           ) : (
-            <VncViewer viewOnly={viewOnly} />
+            <VncViewer key={`vnc-${mode}`} viewOnly={viewOnly} mode={mode} />
           )}
         </div>
       </div>

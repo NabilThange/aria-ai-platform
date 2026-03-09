@@ -125,6 +125,7 @@ export async function startTask(data: {
   description: string;
   model: Model;
   files?: FileWithBase64[];
+  planningEnabled?: boolean;
 }): Promise<Task | null> {
   return apiRequest<Task>("/tasks", {
     method: "POST",

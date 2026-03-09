@@ -16,22 +16,26 @@ import {
 } from '../agent/agent.types';
 import { Message, Role } from '@prisma/client';
 import { v4 as uuid } from 'uuid';
+import { BytezKeyManagerService } from './bytez-key-manager.service';
 
 const DEFAULT_MODEL_NAME = 'anthropic/claude-haiku-4-5';
 
 @Injectable()
 export class BytezService implements BytebotAgentService {
-  private readonly apiKey: string;
   private readonly baseUrl = 'https://api.bytez.com/models/v2';
   private readonly logger = new Logger(BytezService.name);
 
-  constructor(private readonly configService: ConfigService) {
-    this.apiKey = this.configService.get<string>('BYTEZ_API_KEY') || '';
-
-    if (!this.apiKey) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly keyManager: BytezKeyManagerService,
+  ) {
+    const totalKeys = this.keyManager.getTotalKeys();
+    if (totalKeys === 0) {
       this.logger.warn(
-        'BYTEZ_API_KEY is not set. BytezService will not work properly.',
+        'No BYTEZ_API_KEY found. BytezService will not work properly.',
       );
+    } else {
+      this.logger.log(`BytezService initialized with ${totalKeys} API key(s)`);
     }
   }
 
@@ -42,85 +46,129 @@ export class BytezService implements BytebotAgentService {
     useTools: boolean = true,
     signal?: AbortSignal,
   ): Promise<BytebotAgentResponse> {
-    try {
-      const bytezMessages = this.formatMessagesForBytez(messages, systemPrompt);
+    const maxRetries = this.keyManager.getTotalKeys();
+    let lastError: Error | null = null;
 
-      // Extract provider and model from model string (e.g., "anthropic/claude-haiku-4-5")
-      const [provider, modelName] = model.split('/');
-      if (!provider || !modelName) {
-        throw new Error(`Invalid model format: ${model}. Expected format: provider/model-name`);
+    // Try with each available key
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const apiKey = this.keyManager.getCurrentKey();
+      
+      if (!apiKey) {
+        throw new Error('No valid Bytez API key available');
       }
 
-      // Use OpenAI-compatible endpoint for tool calling
-      const endpoint = useTools 
-        ? 'https://api.bytez.com/models/v2/openai/v1/chat/completions'
-        : `${this.baseUrl}/${provider}/${modelName}`;
+      try {
+        const bytezMessages = this.formatMessagesForBytez(messages, systemPrompt);
 
-      const requestBody: any = {
-        messages: bytezMessages,
-        max_tokens: 8192,
-      };
+        // Extract provider and model from model string (e.g., "anthropic/claude-haiku-4-5")
+        const [provider, modelName] = model.split('/');
+        if (!provider || !modelName) {
+          throw new Error(`Invalid model format: ${model}. Expected format: provider/model-name`);
+        }
 
-      // Add model for OpenAI-compatible endpoint
-      if (useTools) {
-        requestBody.model = model;
-        requestBody.tools = this.getComputerUseTools();
-        requestBody.tool_choice = 'auto';
-      }
+        // Use OpenAI-compatible endpoint for tool calling
+        const endpoint = useTools 
+          ? 'https://api.bytez.com/models/v2/openai/v1/chat/completions'
+          : `${this.baseUrl}/${provider}/${modelName}`;
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Key ${this.apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-        signal,
-      });
+        const requestBody: any = {
+          messages: bytezMessages,
+          max_tokens: 8192,
+        };
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          `Bytez API error: ${response.status} - ${JSON.stringify(errorData)}`,
+        // Add model for OpenAI-compatible endpoint
+        if (useTools) {
+          requestBody.model = model;
+          requestBody.tools = this.getComputerUseTools();
+          requestBody.tool_choice = 'auto';
+        }
+
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Key ${apiKey}`,
+          },
+          body: JSON.stringify(requestBody),
+          signal,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const error = new Error(
+            `Bytez API error: ${response.status} - ${JSON.stringify(errorData)}`,
+          );
+          
+          // Mark key as failed and try next one
+          this.keyManager.markCurrentKeyAsFailed(error);
+          lastError = error;
+          continue;
+        }
+
+        const data = await response.json();
+
+        // Handle OpenAI-compatible response format
+        if (useTools && data.choices) {
+          // Mark key as successful
+          this.keyManager.markCurrentKeyAsSuccessful();
+          return this.formatOpenAIResponse(data);
+        }
+
+        // Handle native Bytez response format
+        if (data.error) {
+          const error = new Error(`Bytez error: ${data.error}`);
+          this.keyManager.markCurrentKeyAsFailed(error);
+          lastError = error;
+          continue;
+        }
+
+        if (!data.output || !data.output.content) {
+          const error = new Error('No output content in Bytez response');
+          this.keyManager.markCurrentKeyAsFailed(error);
+          lastError = error;
+          continue;
+        }
+
+        // Mark key as successful
+        this.keyManager.markCurrentKeyAsSuccessful();
+        
+        return {
+          contentBlocks: this.formatBytezResponse(data.output),
+          tokenUsage: {
+            inputTokens: data.provider?.usage?.input_tokens || 0,
+            outputTokens: data.provider?.usage?.output_tokens || 0,
+            totalTokens:
+              (data.provider?.usage?.input_tokens || 0) +
+              (data.provider?.usage?.output_tokens || 0),
+          },
+        };
+      } catch (error: any) {
+        if (error.name === 'AbortError') {
+          throw new BytebotAgentInterrupt();
+        }
+        
+        // Mark key as failed and try next one
+        this.keyManager.markCurrentKeyAsFailed(error);
+        lastError = error;
+        
+        // If this was the last attempt, throw the error
+        if (attempt === maxRetries - 1) {
+          this.logger.error(
+            `All Bytez API keys failed. Last error: ${error.message}`,
+            error.stack,
+          );
+          throw error;
+        }
+        
+        // Otherwise, continue to next key
+        this.logger.warn(
+          `Attempt ${attempt + 1}/${maxRetries} failed, trying next key...`,
         );
       }
-
-      const data = await response.json();
-
-      // Handle OpenAI-compatible response format
-      if (useTools && data.choices) {
-        return this.formatOpenAIResponse(data);
-      }
-
-      // Handle native Bytez response format
-      if (data.error) {
-        throw new Error(`Bytez error: ${data.error}`);
-      }
-
-      if (!data.output || !data.output.content) {
-        throw new Error('No output content in Bytez response');
-      }
-
-      return {
-        contentBlocks: this.formatBytezResponse(data.output),
-        tokenUsage: {
-          inputTokens: data.provider?.usage?.input_tokens || 0,
-          outputTokens: data.provider?.usage?.output_tokens || 0,
-          totalTokens:
-            (data.provider?.usage?.input_tokens || 0) +
-            (data.provider?.usage?.output_tokens || 0),
-        },
-      };
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        throw new BytebotAgentInterrupt();
-      }
-      this.logger.error(
-        `Error sending message to Bytez: ${error.message}`,
-        error.stack,
-      );
-      throw error;
     }
+
+    // If we get here, all keys failed
+    throw lastError || new Error('All Bytez API keys failed');
   }
 
   private formatMessagesForBytez(messages: Message[], systemPrompt: string): any[] {

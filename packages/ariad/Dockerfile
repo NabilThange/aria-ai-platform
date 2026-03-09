@@ -1,250 +1,186 @@
 # -----------------------------------------------------------------------------
-# Aria Dockerfile - Virtual Desktop Environment
+# ARIA Desktop - Optimized VNC Environment
 # -----------------------------------------------------------------------------
-
-# Base image
 FROM ubuntu:22.04
 
 # -----------------------------------------------------------------------------
-# 1. Environment setup
+# Environment & Build Args
 # -----------------------------------------------------------------------------
-# Set non-interactive installation
 ARG DEBIAN_FRONTEND=noninteractive
-# Configure display for X11 applications
-ENV DISPLAY=:0
+ENV DISPLAY=:0 \
+    HOME=/home/user \
+    SHELL=/bin/bash \
+    LANG=en_US.UTF-8 \
+    LC_ALL=C
 
 # -----------------------------------------------------------------------------
-# 2. System dependencies installation
+# System Base (Single Layer)
 # -----------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y \
-    # X11 / VNC
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core X11/VNC stack
     xvfb x11vnc xauth x11-xserver-utils \
-    x11-apps sudo software-properties-common \
-    # Desktop environment 
-    xfce4 xfce4-goodies dbus wmctrl \
-    # Display manager with autologin capability
-    lightdm \
+    # Minimal XFCE (no bloat)
+    xfce4-session xfce4-panel xfwm4 xfdesktop4 \
+    thunar mousepad xfce4-terminal \
+    # Icon themes (for proper icon display)
+    adwaita-icon-theme-full gnome-icon-theme hicolor-icon-theme \
+    gtk-update-icon-cache librsvg2-common \
+    # System essentials
+    dbus dbus-x11 wmctrl sudo ca-certificates \
     # Development tools
-    python3 python3-pip curl wget git vim \
-    # Utilities
+    python3 python3-pip curl wget git \
+    # Process management
     supervisor netcat-openbsd \
-    # Applications
-    xpdf gedit xpaint \
-    # Libraries
-    libxtst-dev \
-    # Remove unneeded dependencies
-    && apt-get remove -y light-locker xfce4-screensaver xfce4-power-manager || true \
-    # Clean up to reduce image size
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /run/dbus && \
-    # Generate a machine-id so dbus-daemon doesn't complain
-    dbus-uuidgen --ensure=/etc/machine-id
+    # Minimal utilities (calculator, image viewer, archive manager)
+    galculator ristretto file-roller \
+    # Build dependencies (needed later)
+    cmake build-essential \
+    libx11-dev libxtst-dev libxinerama-dev libxi-dev \
+    libxt-dev libxrandr-dev libxkbcommon-dev libxkbcommon-x11-dev \
+    xclip \
+    # Explicitly remove bloat
+    && apt-get remove -y --purge \
+        light-locker xfce4-screensaver xfce4-power-manager \
+        xfce4-notifyd xfce4-pulseaudio-plugin \
+        parole xfburn gigolo \
+        || true \
+    # Aggressive cleanup
+    && apt-get autoremove -y --purge \
+    && apt-get clean \
+    && rm -rf \
+        /var/lib/apt/lists/* \
+        /usr/share/doc/* \
+        /usr/share/man/* \
+        /usr/share/locale/* \
+        /tmp/* \
+        /var/tmp/* \
+    # Setup dbus
+    && mkdir -p /run/dbus /var/run/dbus \
+    && dbus-uuidgen > /etc/machine-id
 
 # -----------------------------------------------------------------------------
-# 3. Additional software installation
+# Firefox & Node.js (Single Layer)
 # -----------------------------------------------------------------------------
-# Install Firefox
-RUN apt-get update && apt-get install -y \
-    # Install necessary for adding PPA
-    software-properties-common apt-transport-https wget gnupg \
-    # Install Additional Graphics Libraries
-    mesa-utils \
-    libgl1-mesa-dri \
-    libgl1-mesa-glx \
-    # Install Sandbox Capabilities
-    libcap2-bin \
-    # Install Fonts
-    fontconfig \
-    fonts-dejavu \
-    fonts-liberation \
-    fonts-freefont-ttf \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common apt-transport-https gnupg \
+    libgl1-mesa-dri libgl1-mesa-glx libcap2-bin \
+    fontconfig fonts-dejavu-core \
     && add-apt-repository -y ppa:mozillateam/ppa \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get update \
-    && apt-get install -y firefox-esr thunderbird \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    # Set Firefox as default browser system-wide
+    && apt-get install -y --no-install-recommends firefox-esr nodejs \
+    # Set Firefox as default browser
     && update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/firefox-esr 200 \
     && update-alternatives --set x-www-browser /usr/bin/firefox-esr \
-    && fc-cache -f -v
-
-
-# Install 1Password based on architecture
-RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then \
-        # Install from APT repository for AMD64
-        curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
-        gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg && \
-        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/amd64 stable main" | \
-        tee /etc/apt/sources.list.d/1password.list && \
-        mkdir -p /etc/debsig/policies/AC2D62742012EA22/ && \
-        curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol | \
-        tee /etc/debsig/policies/AC2D62742012EA22/1password.pol && \
-        mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22 && \
-        curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
-        gpg --dearmor --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg && \
-        apt-get update && apt-get install -y 1password && \
-        apt-get clean && rm -rf /var/lib/apt/lists/*; \
-    elif [ "$ARCH" = "arm64" ]; then \
-        # Install from tar.gz for ARM64
-        apt-get update && apt-get install -y \
-            libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils \
-            libatspi2.0-0 libdrm2 libgbm1 libxcb-dri3-0 libxkbcommon0 \
-            libsecret-1-0 && \
-        apt-get clean && rm -rf /var/lib/apt/lists/* && \
-        curl -sSL https://downloads.1password.com/linux/tar/beta/aarch64/1password-latest.tar.gz -o /tmp/1password.tar.gz && \
-        # Extract the full 1Password bundle so libraries like libffmpeg.so remain in their expected relative paths
-        mkdir -p /opt/1password && \
-        tar -xzf /tmp/1password.tar.gz -C /opt/1password --strip-components=1 && \
-        # Link the main executable into the global PATH
-        ln -sf /opt/1password/1password /usr/bin/1password && \
-        chmod +x /opt/1password/1password && \
-        # Copy icons to standard locations
-        mkdir -p /usr/share/pixmaps /usr/share/icons/hicolor/512x512/apps /usr/share/icons/hicolor/256x256/apps && \
-        find /opt/1password -name "*1password*.png" -o -name "*1password*.svg" | while read icon; do \
-            if [[ "$icon" == *"512"* ]]; then \
-                cp "$icon" /usr/share/icons/hicolor/512x512/apps/1password.png 2>/dev/null || true; \
-            elif [[ "$icon" == *"256"* ]]; then \
-                cp "$icon" /usr/share/icons/hicolor/256x256/apps/1password.png 2>/dev/null || true; \
-            fi; \
-            cp "$icon" /usr/share/pixmaps/1password.png 2>/dev/null || true; \
-        done && \
-        # Clean up temporary files
-        rm -rf /tmp/1password.tar.gz && \
-        # Update icon cache
-        gtk-update-icon-cache -f -t /usr/share/icons/hicolor 2>/dev/null || true; \
-    else \
-        echo "1Password is not available for $ARCH architecture."; \
-    fi
-
-# Install Visual Studio Code
-RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "amd64" ]; then \
-        apt-get update && apt-get install -y wget gpg apt-transport-https software-properties-common && \
-        wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/ms_vscode.gpg && \
-        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/ms_vscode.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list && \
-        apt-get update && apt-get install -y code && \
-        apt-get clean && rm -rf /var/lib/apt/lists/* ; \
-    elif [ "$ARCH" = "arm64" ]; then \
-        apt-get update && apt-get install -y wget gpg && \
-        wget -qO /tmp/code_arm64.deb https://update.code.visualstudio.com/latest/linux-deb-arm64/stable && \
-        apt-get install -y /tmp/code_arm64.deb && \
-        rm -f /tmp/code_arm64.deb && \
-        apt-get clean && rm -rf /var/lib/apt/lists/* ; \
-    else \
-        echo "VSCode is not available for $ARCH architecture."; \
-    fi
-
-# Install Node.js
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get update \
-    && apt-get install -y nodejs \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && fc-cache -f -v \
+    # Cleanup
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /tmp/*
 
 # Upgrade pip
-RUN pip3 install --upgrade pip
+RUN pip3 install --no-cache-dir --upgrade pip
 
 # -----------------------------------------------------------------------------
-# 4. VNC and remote access setup
+# VNC & noVNC (Optimized)
 # -----------------------------------------------------------------------------
-# Install noVNC and websockify
-RUN git clone https://github.com/novnc/noVNC.git /opt/noVNC \
-    && git clone https://github.com/novnc/websockify.git /opt/websockify \
+RUN git clone --depth 1 https://github.com/novnc/noVNC.git /opt/noVNC \
+    && git clone --depth 1 https://github.com/novnc/websockify.git /opt/websockify \
     && cd /opt/websockify \
-    && pip3 install --break-system-packages .
+    && pip3 install --no-cache-dir --break-system-packages . \
+    && rm -rf /opt/noVNC/.git /opt/websockify/.git
 
 # -----------------------------------------------------------------------------
-# 5. Application setup (ariad)
+# ARIA Application Build
 # -----------------------------------------------------------------------------
-# Copy package files first to leverage Docker cache
-
-# Install dependencies required to build libnut-core and uiohook-napi
-RUN apt-get update && \
-    apt-get install -y \
-        cmake \
-        libx11-dev \
-        libxtst-dev \
-        libxinerama-dev \
-        libxi-dev \
-        libxt-dev \
-        libxrandr-dev \
-        libxkbcommon-dev \
-        libxkbcommon-x11-dev \
-        xclip \
-        git build-essential && \
-    rm -rf /var/lib/apt/lists/*
-
+# Copy source files (context is packages/, so we need ariad/ prefix)
 COPY ./shared/ /aria/shared/
 COPY ./ariad/ /aria/ariad/
+
+# Build ariad
 WORKDIR /aria/ariad
-RUN npm install --build-from-source
-RUN npm rebuild uiohook-napi --build-from-source
+RUN npm install \
+    && npm rebuild uiohook-napi \
+    && npm run build \
+    && npm prune --production \
+    && npm cache clean --force \
+    && rm -rf /root/.npm /tmp/*
 
-RUN npm run build
-
+# Build libnut-core (optimized)
 WORKDIR /compile
-
-RUN git clone https://github.com/ZachJW34/libnut-core.git && \
-    cd libnut-core && \
-    npm install && \
-    npm run build:release
-
-# replace /ariad/node_modules/@nut-tree-fork/libnut-linux/build/Release/libnut.node with /compile/libnut-core/build/Release/libnut.node
-RUN rm -f /aria/ariad/node_modules/@nut-tree-fork/libnut-linux/build/Release/libnut.node && \
-    cp /compile/libnut-core/build/Release/libnut.node /aria/ariad/node_modules/@nut-tree-fork/libnut-linux/build/Release/libnut.node
-
-RUN rm -rf /compile
+RUN git clone --depth 1 https://github.com/ZachJW34/libnut-core.git \
+    && cd libnut-core \
+    && npm ci \
+    && npm run build:release \
+    && cp build/Release/libnut.node /aria/ariad/node_modules/@nut-tree-fork/libnut-linux/build/Release/libnut.node \
+    # Cleanup build artifacts
+    && cd / \
+    && rm -rf /compile /tmp/* /var/tmp/* \
+    && apt-get remove -y --purge cmake build-essential git \
+    && apt-get autoremove -y --purge \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /aria/ariad
 
 # -----------------------------------------------------------------------------
-# 7. User setup and autologin configuration
+# User Setup & System Configuration
 # -----------------------------------------------------------------------------
-# Create non-root user
-RUN useradd -ms /bin/bash user && echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Create user with sudo access
+RUN useradd -m -s /bin/bash user \
+    && echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
+    && mkdir -p /tmp/aria-screenshots \
+    && chown -R user:user /tmp/aria-screenshots
 
-RUN mkdir -p /var/run/dbus && \
-    chmod 755 /var/run/dbus && \
-    chown user:user /var/run/dbus
+# Copy system configuration files
+RUN chown -R root:root /aria/ariad/root \
+    && find /aria/ariad/root -type f -exec chmod 644 {} + \
+    && find /aria/ariad/root -type d -exec chmod 755 {} + \
+    && find /aria/ariad/root -type f -executable -exec chmod +x {} + \
+    && cp -a /aria/ariad/root/. /
 
-RUN mkdir -p /tmp/aria-screenshots && \
-    chown -R user:user /tmp/aria-screenshots
+# Copy custom ARIA wallpaper (from build context packages/)
+COPY ariad/ARIA-BG.png /usr/share/backgrounds/aria-bg.png
 
-# -----------------------------------------------------------------------------
-#  Copy staged system files and keep sane permissions
-# -----------------------------------------------------------------------------
-# 1. Ensure everything under /ariad/root is owned by root (files + dirs)
-# 2. Set *files* to 0644 and *directories* to 0755 so that applications can
-#    traverse directories (execute bit!) while keeping the contents read-only.
-# 3. Copy the tree to /
-RUN chown -R root:root /aria/ariad/root && \
-    find /aria/ariad/root -type f -exec chmod 644 {} + && \
-    find /aria/ariad/root -type d -exec chmod 755 {} + && \
-    find /aria/ariad/root -type f -executable -exec chmod +x {} + && \
-    cp -a /aria/ariad/root/. /
-
-RUN chown -R user:user /home/user
-RUN chmod -R 755 /home/user
-
+# Setup user home directory with wallpaper autostart
 RUN mkdir -p /home/user/Desktop && \
-    cp -f /usr/share/applications/firefox.desktop /home/user/Desktop/ && \
-    cp -f /usr/share/applications/thunderbird.desktop /home/user/Desktop/ && \
-    cp -f /usr/share/applications/1password.desktop /home/user/Desktop/ && \
-    cp -f /usr/share/applications/code.desktop /home/user/Desktop/ && \
-    cp -f /usr/share/applications/terminal.desktop /home/user/Desktop/ && \
-    chmod +x /home/user/Desktop/*.desktop && \
-    chown user:user /home/user/Desktop/*.desktop
-
-RUN mkdir -p /home/user/.config /home/user/.local/share /home/user/.cache \
-    && chown -R user:user /home/user/.config /home/user/.local /home/user/.cache
+    mkdir -p /home/user/.config/autostart && \
+    mkdir -p /home/user/.local/share && \
+    mkdir -p /home/user/.cache && \
+    # Copy all application shortcuts to desktop
+    cp -f /usr/share/applications/firefox.desktop /home/user/Desktop/ 2>/dev/null || true && \
+    cp -f /usr/share/applications/firefox-esr.desktop /home/user/Desktop/ 2>/dev/null || true && \
+    cp -f /usr/share/applications/xfce4-terminal.desktop /home/user/Desktop/ 2>/dev/null || true && \
+    cp -f /usr/share/applications/mousepad.desktop /home/user/Desktop/ 2>/dev/null || true && \
+    cp -f /usr/share/applications/Thunar.desktop /home/user/Desktop/ 2>/dev/null || true && \
+    cp -f /usr/share/applications/thunar.desktop /home/user/Desktop/ 2>/dev/null || true && \
+    cp -f /usr/share/applications/galculator.desktop /home/user/Desktop/ 2>/dev/null || true && \
+    cp -f /usr/share/applications/ristretto.desktop /home/user/Desktop/ 2>/dev/null || true && \
+    cp -f /usr/share/applications/org.gnome.FileRoller.desktop /home/user/Desktop/ 2>/dev/null || true && \
+    cp -f /usr/share/applications/file-roller.desktop /home/user/Desktop/ 2>/dev/null || true && \
+    # Mark all desktop files as trusted/executable
+    chmod +x /home/user/Desktop/*.desktop 2>/dev/null || true && \
+    # Fix icon theme cache
+    gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true && \
+    echo '#!/bin/bash' > /home/user/.config/set-wallpaper.sh && \
+    echo 'sleep 3' >> /home/user/.config/set-wallpaper.sh && \
+    echo 'DISPLAY=:0 xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitorscreen/workspace0/last-image -s /usr/share/backgrounds/aria-bg.png' >> /home/user/.config/set-wallpaper.sh && \
+    echo 'DISPLAY=:0 xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitorscreen/workspace0/image-style -s 5' >> /home/user/.config/set-wallpaper.sh && \
+    chmod +x /home/user/.config/set-wallpaper.sh && \
+    echo '[Desktop Entry]' > /home/user/.config/autostart/set-wallpaper.desktop && \
+    echo 'Type=Application' >> /home/user/.config/autostart/set-wallpaper.desktop && \
+    echo 'Name=Set Wallpaper' >> /home/user/.config/autostart/set-wallpaper.desktop && \
+    echo 'Exec=/home/user/.config/set-wallpaper.sh' >> /home/user/.config/autostart/set-wallpaper.desktop && \
+    echo 'Hidden=false' >> /home/user/.config/autostart/set-wallpaper.desktop && \
+    echo 'NoDisplay=false' >> /home/user/.config/autostart/set-wallpaper.desktop && \
+    echo 'X-GNOME-Autostart-enabled=true' >> /home/user/.config/autostart/set-wallpaper.desktop && \
+    chown -R user:user /home/user && \
+    chmod -R 755 /home/user
 
 WORKDIR /home/user
 
 # -----------------------------------------------------------------------------
-# 8. Port configuration and runtime
+# Runtime Configuration
 # -----------------------------------------------------------------------------
-# - Port 9990: ariad and external noVNC websocket
 EXPOSE 9990
 
-# Start supervisor to manage all services
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf", "-n"]

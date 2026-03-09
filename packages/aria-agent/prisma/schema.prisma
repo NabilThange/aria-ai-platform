@@ -41,47 +41,49 @@ enum TaskType {
 }
 
 model Task {
-  id            String        @id @default(uuid())
-  description   String
-  type          TaskType      @default(IMMEDIATE)
-  status        TaskStatus    @default(PENDING)
-  priority      TaskPriority  @default(MEDIUM)
-  control       Role          @default(ASSISTANT)
-  createdAt     DateTime      @default(now())
-  createdBy     Role          @default(USER)
-  scheduledFor  DateTime?
-  updatedAt     DateTime      @updatedAt
-  executedAt    DateTime?
-  completedAt   DateTime?
-  queuedAt      DateTime?
-  error         String?
-  result        Json?
+  id              String       @id @default(uuid())
+  description     String
+  type            TaskType     @default(IMMEDIATE)
+  status          TaskStatus   @default(PENDING)
+  priority        TaskPriority @default(MEDIUM)
+  control         Role         @default(ASSISTANT)
+  createdAt       DateTime     @default(now())
+  createdBy       Role         @default(USER)
+  scheduledFor    DateTime?
+  updatedAt       DateTime     @updatedAt
+  executedAt      DateTime?
+  completedAt     DateTime?
+  queuedAt        DateTime?
+  error           String?
+  result          Json?
   // Example: 
   // { "provider": "anthropic", "name": "claude-opus-4-20250514", "title": "Claude Opus 4" }
-  model         Json
-  messages      Message[]
-  summaries     Summary[]
-  files         File[]
+  model           Json
+  planningEnabled Boolean      @default(false) // Whether to use planning mode
+  messages        Message[]
+  summaries       Summary[]
+  files           File[]
+  plan            Plan? // One-to-one relationship with Plan
 }
 
 model Summary {
-  id             String     @id @default(uuid())
-  content        String
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  messages       Message[]  // One-to-many relationship: one Summary has many Messages
+  id        String    @id @default(uuid())
+  content   String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  messages  Message[] // One-to-many relationship: one Summary has many Messages
 
-  task      Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  taskId    String
-  
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId String
+
   // Self-referential relationship
-  parentSummary  Summary?   @relation("SummaryHierarchy", fields: [parentId], references: [id])
+  parentSummary  Summary?  @relation("SummaryHierarchy", fields: [parentId], references: [id])
   parentId       String?
-  childSummaries Summary[]  @relation("SummaryHierarchy")
+  childSummaries Summary[] @relation("SummaryHierarchy")
 }
 
 model Message {
-  id        String      @id @default(uuid())
+  id        String   @id @default(uuid())
   // Content field follows Anthropic's content blocks structure
   // Example: 
   // [
@@ -89,26 +91,138 @@ model Message {
   //   {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "..."}}
   // ]
   content   Json
-  role      Role @default(ASSISTANT)
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  task      Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  role      Role     @default(ASSISTANT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
   taskId    String
-  summary   Summary?    @relation(fields: [summaryId], references: [id])
-  summaryId String?     // Optional foreign key to Summary
+  summary   Summary? @relation(fields: [summaryId], references: [id])
+  summaryId String? // Optional foreign key to Summary
 }
 
 model File {
-  id            String      @id @default(uuid())
-  name          String
-  type          String      // MIME type
-  size          Int         // Size in bytes
-  data          String      // Base64 encoded file data
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  
+  id        String   @id @default(uuid())
+  name      String
+  type      String // MIME type
+  size      Int // Size in bytes
+  data      String // Base64 encoded file data
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relations
-  task          Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  taskId        String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId String
 }
 
+// ============================================
+// Planning System Models
+// ============================================
+
+enum PlanStatus {
+  PLANNING // Plan is being generated
+  PENDING // Plan generated, awaiting user approval
+  APPROVED // User approved, ready for execution
+  EXECUTING // Currently executing
+  COMPLETED // Execution completed successfully
+  FAILED // Execution failed
+  CANCELLED // User cancelled
+}
+
+enum Strategy {
+  TERMINAL // Command-line based approach
+  GUI // Graphical interface approach
+  HYBRID // Mix of terminal and GUI
+  BROWSER // Web browser based approach
+}
+
+enum StepType {
+  TERMINAL // Execute bash command
+  GUI // GUI interaction (click, type, etc.)
+  BROWSER // Browser navigation/interaction
+  WAIT // Wait for duration
+  VERIFY // Verification step
+}
+
+enum StepStatus {
+  PENDING // Not started
+  EXECUTING // Currently running
+  COMPLETED // Successfully completed
+  FAILED // Failed with error
+  SKIPPED // Skipped due to dependency failure
+}
+
+// Plan represents the overall planning session for a task
+model Plan {
+  id              String          @id @default(uuid())
+  taskId          String          @unique
+  task            Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskDescription String
+  status          PlanStatus      @default(PLANNING)
+  selectedPathId  String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  paths           ExecutionPath[]
+  checkpoints     Checkpoint[]
+
+  @@index([taskId])
+  @@index([status])
+}
+
+// ExecutionPath represents one possible approach to complete the task
+model ExecutionPath {
+  id                 String     @id @default(uuid())
+  planId             String
+  plan               Plan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+  name               String // e.g., "Terminal Approach", "GUI Approach"
+  description        String // Brief explanation of this approach
+  strategy           Strategy
+  estimatedTokens    Int // Total estimated tokens for this path
+  estimatedDuration  Int // Estimated seconds to complete
+  successProbability Float // 0.0 to 1.0
+  pros               String[] // Advantages of this approach
+  cons               String[] // Disadvantages of this approach
+  order              Int // Display order (0, 1, 2)
+  createdAt          DateTime   @default(now())
+  steps              PlanStep[]
+
+  @@index([planId])
+}
+
+// PlanStep represents a single action in an execution path
+model PlanStep {
+  id              String        @id @default(uuid())
+  pathId          String
+  path            ExecutionPath @relation(fields: [pathId], references: [id], onDelete: Cascade)
+  order           Int // Execution order within path
+  action          String // Human-readable description
+  description     String // Detailed explanation
+  type            StepType
+  command         String? // For terminal steps
+  screenshot      Boolean       @default(false) // Whether to take screenshot
+  verification    String? // How to verify success
+  estimatedTokens Int // Tokens for this step
+  checkpoint      Boolean       @default(false) // Create checkpoint before this step
+  dependencies    String[] // IDs of steps that must complete first
+  status          StepStatus    @default(PENDING)
+  executedAt      DateTime?
+  completedAt     DateTime?
+  error           String?
+  createdAt       DateTime      @default(now())
+
+  @@index([pathId])
+  @@index([status])
+}
+
+// Checkpoint represents a saved state during execution
+model Checkpoint {
+  id         String   @id @default(uuid())
+  planId     String
+  plan       Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  stepId     String // Step ID where checkpoint was created
+  screenshot String? // Base64 screenshot (optional)
+  state      Json // Serialized execution context
+  createdAt  DateTime @default(now())
+
+  @@index([planId])
+  @@index([createdAt])
+}

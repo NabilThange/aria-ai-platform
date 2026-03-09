@@ -53,6 +53,7 @@ export class TasksService {
           status: TaskStatus.PENDING,
           createdBy: createTaskDto.createdBy || Role.USER,
           model: createTaskDto.model,
+          planningEnabled: createTaskDto.planningEnabled || false,
           ...(createTaskDto.scheduledFor
             ? { scheduledFor: createTaskDto.scheduledFor }
             : {}),

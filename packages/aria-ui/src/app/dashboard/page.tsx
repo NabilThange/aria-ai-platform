@@ -47,6 +47,7 @@ export default function Home() {
   });
   const [selectedModel, setSelectedModel] = useState<Model | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<FileWithBase64[]>([]);
+  const [planningEnabled, setPlanningEnabled] = useState(false);
   const router = useRouter();
   const [activePopoverIndex, setActivePopoverIndex] = useState<number | null>(
     null,
@@ -107,9 +108,11 @@ export default function Home() {
         description: string;
         model: Model;
         files?: FileWithBase64[];
+        planningEnabled?: boolean;
       } = {
         description: input,
         model: selectedModel,
+        planningEnabled,
       };
 
       // Include files if any are uploaded
@@ -161,6 +164,8 @@ export default function Home() {
                   onSend={handleSend}
                   onFileUpload={handleFileUpload}
                   minLines={3}
+                  planningEnabled={planningEnabled}
+                  onPlanningToggle={setPlanningEnabled}
                 />
                 <div className="mt-2">
                   <ModelSelector
@@ -206,6 +211,8 @@ export default function Home() {
                   onSend={handleSend}
                   onFileUpload={handleFileUpload}
                   minLines={3}
+                  planningEnabled={planningEnabled}
+                  onPlanningToggle={setPlanningEnabled}
                 />
                 <div className="mt-2">
                   <ModelSelector

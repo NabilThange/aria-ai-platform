@@ -57,4 +57,7 @@ export class CreateTaskDto {
   @ValidateNested({ each: true })
   @Type(() => TaskFileDto)
   files?: TaskFileDto[];
+
+  @IsOptional()
+  planningEnabled?: boolean;
 }

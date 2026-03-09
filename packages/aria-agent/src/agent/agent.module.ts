@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TasksModule } from '../tasks/tasks.module';
 import { MessagesModule } from '../messages/messages.module';
 import { AgentProcessor } from './agent.processor';
@@ -11,6 +11,7 @@ import { OpenRouterModule } from '../openrouter/openrouter.module';
 import { BytezModule } from '../bytez/bytez.module';
 import { SummariesModule } from 'src/summaries/summaries.modue';
 import { AgentAnalyticsService } from './agent.analytics';
+import { PlannerModule } from '../planner/planner.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AgentAnalyticsService } from './agent.analytics';
     GroqModule,
     OpenRouterModule,
     BytezModule,
+    forwardRef(() => PlannerModule),
   ],
   providers: [
     AgentProcessor,

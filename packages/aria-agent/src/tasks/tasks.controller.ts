@@ -24,7 +24,17 @@ import { BytebotAgentModel } from 'src/agent/agent.types';
 const googleApiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
 const groqApiKey = process.env.GROQ_API_KEY;
 const openRouterApiKey = process.env.OPENROUTER_API_KEY;
-const bytezApiKey = process.env.BYTEZ_API_KEY;
+
+// Check for any Bytez API key (single or numbered)
+const hasBytezApiKey = (): boolean => {
+  if (process.env.BYTEZ_API_KEY) return true;
+  let keyIndex = 1;
+  while (process.env[`BYTEZ_API_KEY_${keyIndex}`]) {
+    return true;
+  }
+  return false;
+};
+const bytezApiKey = hasBytezApiKey();
 
 const models = [
   ...(googleApiKey ? GOOGLE_MODELS : []),

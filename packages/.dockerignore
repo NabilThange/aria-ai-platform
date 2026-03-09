@@ -1,0 +1,61 @@
+# Node modules (will be installed during build)
+**/node_modules
+
+# Build outputs
+**/dist
+**/.next
+**/build
+
+# Git
+**/.git
+**/.github
+
+# IDE
+**/.vscode
+**/.idea
+**/.kiro
+
+# Agent directories (contain symlinks that cause issues)
+**/.agent
+**/.agents
+
+# Environment files
+**/.env*
+!**/.env.production
+
+# Logs
+**/npm-debug.log
+**/yarn-debug.log
+**/yarn-error.log
+**/lerna-debug.log
+
+# Lock files - KEEP package-lock.json for ariad
+**/yarn.lock
+aria-agent/package-lock.json
+aria-ui/package-lock.json
+
+# Test coverage
+**/coverage
+
+# Temporary files
+**/.DS_Store
+**/Thumbs.db
+**/*.swp
+**/*.swo
+**/tmp
+**/.tmp
+
+# Documentation
+**/README.md
+**/CHANGELOG.md
+**/*.md
+!**/SKILL.md
+!**/AGENTS.md
+
+# Exclude other packages when building ariad
+aria-agent
+aria-ui
+
+# Keep only what's needed
+!ariad
+!shared

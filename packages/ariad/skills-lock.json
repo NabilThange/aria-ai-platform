@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "prompt-engineering": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "391b095dad10f5eb30404990a72485cf097c6c75f690c84f533ebcfa87460aed"
+    },
+    "prompt-engineering-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "b3928f5cd846977a15c15dfd04dd9180ca05639063fe92e8f4dd8afb61173d4a"
+    }
+  }
+}

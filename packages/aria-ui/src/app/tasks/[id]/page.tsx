@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { ChatContainer } from "@/components/messages/ChatContainer";
 import { DesktopContainer } from "@/components/ui/desktop-container";
 import { useChatSession } from "@/hooks/useChatSession";
 import { useScrollScreenshot } from "@/hooks/useScrollScreenshot";
 import { useParams, useRouter } from "next/navigation";
-import { Role, TaskStatus } from "@/types";
+import { Role, TaskStatus, Task } from "@/types";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   MoreVerticalCircle01Icon,
@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { VirtualDesktopStatus } from "@/components/VirtualDesktopStatusHeader";
+import { PlanningContainer } from "@/components/planner/PlanningContainer";
+import { fetchTaskById } from "@/utils/taskUtils";
 
 export default function TaskPage() {
   const params = useParams();
@@ -28,6 +30,16 @@ export default function TaskPage() {
   const taskId = params.id as string;
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [taskDetails, setTaskDetails] = useState<Task | null>(null);
+  const [desktopMode, setDesktopMode] = useState<"online" | "offline">("offline"); // Default to offline for local testing
+
+  // Load desktop mode preference from localStorage
+  useEffect(() => {
+    const savedMode = localStorage.getItem("desktopMode") as "online" | "offline" | null;
+    if (savedMode) {
+      setDesktopMode(savedMode);
+    }
+  }, []);
   const {
     messages,
     groupedMessages,
@@ -46,6 +58,18 @@ export default function TaskPage() {
     handleCancelTask,
     currentTaskId,
   } = useChatSession({ initialTaskId: taskId });
+
+  // Fetch task details to check if planning is enabled
+  useEffect(() => {
+    const loadTaskDetails = async () => {
+      const task = await fetchTaskById(taskId);
+      setTaskDetails(task);
+    };
+    loadTaskDetails();
+  }, [taskId]);
+
+  // Check if task has planning enabled
+  const hasPlan = taskDetails?.planningEnabled === true;
 
   // Determine if task is inactive (show screenshot) or active (show VNC)
   function isTaskInactive(): boolean {
@@ -90,11 +114,12 @@ export default function TaskPage() {
 
   // For inactive tasks, auto-load all messages for proper screenshot navigation
   useEffect(() => {
-    if (isTaskInactive() && hasMoreMessages && !isLoadingMoreMessages) {
+    const inactive = isTaskInactive();
+    if (inactive && hasMoreMessages && !isLoadingMoreMessages) {
       loadMoreMessages();
     }
   }, [
-    isTaskInactive(),
+    taskStatus,
     hasMoreMessages,
     isLoadingMoreMessages,
     loadMoreMessages,
@@ -117,16 +142,17 @@ export default function TaskPage() {
   }, [currentTaskId, taskId, router]);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-screen flex-col">
       <Header />
 
       <main className="m-2 flex-1 overflow-hidden px-2 py-4">
         <div className="grid h-full grid-cols-7 gap-4">
           {/* Main container */}
-          <div className="col-span-4">
+          <div className="col-span-4 h-full">
             <DesktopContainer
               screenshot={isTaskInactive() ? currentScreenshot : null}
               viewOnly={vncViewOnly()}
+              mode={desktopMode}
               status={
                 (() => {
                   if (
@@ -140,11 +166,37 @@ export default function TaskPage() {
                   if (taskStatus === TaskStatus.FAILED) return "failed";
                   if (taskStatus === TaskStatus.CANCELLED) return "canceled";
                   if (taskStatus === TaskStatus.COMPLETED) return "completed";
-                  // You may want to add a scheduled state if you have that info
                   return "pending";
                 })() as VirtualDesktopStatus
               }
             >
+              {/* Desktop Mode Toggle */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={desktopMode === "online" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => {
+                    setDesktopMode("online");
+                    localStorage.setItem("desktopMode", "online");
+                  }}
+                  className="text-xs"
+                >
+                  Online
+                </Button>
+                <Button
+                  variant={desktopMode === "offline" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => {
+                    setDesktopMode("offline");
+                    localStorage.setItem("desktopMode", "offline");
+                  }}
+                  className="text-xs"
+                >
+                  Local
+                </Button>
+              </div>
+
+              {/* Task Control Buttons */}
               {canTakeOver() && (
                 <Button
                   onClick={handleTakeOverTask}
@@ -188,12 +240,29 @@ export default function TaskPage() {
             </DesktopContainer>
           </div>
 
-          {/* Chat Area */}
-          <div className="col-span-3 flex h-full min-h-0 flex-col">
+          {/* Chat and Planning Area */}
+          <div className="col-span-3 flex h-full flex-col overflow-hidden">
+            {/* Show planning container if task is pending and has planning */}
+            {hasPlan && taskStatus === TaskStatus.PENDING && taskDetails && (
+              <div className="hide-scrollbar mb-4 max-h-[60vh] overflow-y-auto px-2">
+                <PlanningContainer
+                  taskId={taskId}
+                  taskDescription={taskDetails.description}
+                  model={taskDetails.model.name}
+                  onPlanApproved={() => {
+                    console.log("Plan approved");
+                  }}
+                  onPlanCancelled={() => {
+                    router.push("/dashboard");
+                  }}
+                />
+              </div>
+            )}
+            
             {/* Messages scrollable area */}
             <div
               ref={chatContainerRef}
-              className="hide-scrollbar min-h-0 flex-1 overflow-scroll px-4"
+              className="hide-scrollbar flex-1 overflow-y-auto px-4"
             >
               <ChatContainer
                 scrollRef={chatContainerRef}
