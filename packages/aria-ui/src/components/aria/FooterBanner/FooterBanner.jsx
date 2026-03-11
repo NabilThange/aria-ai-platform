@@ -36,7 +36,7 @@ const FooterBanner = () => {
     }, { scope: fbConRef });
 
     return (
-        < div ref={fbConRef} className="w-screen h-dvh p-2 overflow-hidden" >
+        < div ref={fbConRef} className="w-screen h-dvh p-2 overflow-hidden" style={{ backgroundColor: '#181717' }} >
             <div className='w-full relative overflow-hidden rounded-4xl'>
                 <ClickIndicator active={active} />
                 <img

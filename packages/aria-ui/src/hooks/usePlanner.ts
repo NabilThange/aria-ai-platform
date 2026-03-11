@@ -88,10 +88,6 @@ export function usePlanner({ taskId }: UsePlannerProps) {
       setIsLoading(false);
     }
   }, [taskId]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [taskId]);
 
   const approvePlan = useCallback(
     async (planId: string, pathId: string) => {

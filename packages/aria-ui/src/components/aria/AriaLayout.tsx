@@ -22,5 +22,17 @@ export function AriaLayout({ children }: AriaLayoutProps) {
     ScrollTrigger.refresh();
   }, []);
 
-  return <div className="aria-landing">{children}</div>;
+  return (
+    <div 
+      className="aria-landing" 
+      style={{ 
+        backgroundColor: '#181717', 
+        minHeight: '100vh', 
+        width: '100%',
+        position: 'relative'
+      }}
+    >
+      {children}
+    </div>
+  );
 }

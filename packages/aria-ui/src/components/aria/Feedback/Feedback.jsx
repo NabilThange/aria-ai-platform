@@ -25,7 +25,7 @@ const Feedback = () => {
     const progressWidth = feedbackReviewLG[index][3];
 
     return (
-        <section className='w-sereen h-dvh p-8 flex flex-col justify-center items-center'>
+        <section className='w-sereen h-dvh p-8 flex flex-col justify-center items-center' style={{ backgroundColor: '#181717' }}>
             <div className='w-full text-left'>
                 <p className='text-[.7rem] font-bold text-[#eae5dd] activities-subtitle text-left'>
                     Do people like us?

@@ -26,6 +26,21 @@
       "sourceType": "github",
       "computedHash": "23565496cf079e75ef18f4f06d7703dad0d96b2a2be29f5b9da159fc50278b78"
     },
+    "image-optimization": {
+      "source": "secondsky/claude-skills",
+      "sourceType": "github",
+      "computedHash": "56dfbd844a92bbaad340f16b44c49f4168f2d4538f885bf638ecad8ed55781b6"
+    },
+    "next-best-practices": {
+      "source": "vercel-labs/next-skills",
+      "sourceType": "github",
+      "computedHash": "c31ddd68ba5798a79a516c619b1e1fc4408cc4876ad600fefa4f5add4425719d"
+    },
+    "performance-optimization": {
+      "source": "supercent-io/skills-template",
+      "sourceType": "github",
+      "computedHash": "21ffefa616b4f835765200001fa3aa6d6561d5eab720f9502299c4913cd14d32"
+    },
     "prompt-engineering": {
       "source": "sickn33/antigravity-awesome-skills",
       "sourceType": "github",
@@ -36,10 +51,20 @@
       "sourceType": "github",
       "computedHash": "b3928f5cd846977a15c15dfd04dd9180ca05639063fe92e8f4dd8afb61173d4a"
     },
+    "systematic-debugging": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "computedHash": "72e9ab72627e4fd8ed26a582e82309a98ecdc4f6e1c99418430ac05682c9e91d"
+    },
     "task-planning": {
       "source": "supercent-io/skills-template",
       "sourceType": "github",
       "computedHash": "cc0f00bb1c8c5130160a08b18cd71d6f743871036593ce5b31e0fc9e4e0205df"
+    },
+    "test-driven-development": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "computedHash": "126f1ebf6ccd414f42544f6e83d8cc5adb089e1108eaffb7c400701e37eecd9f"
     },
     "uncodixfy": {
       "source": "cyxzdev/Uncodixfy",

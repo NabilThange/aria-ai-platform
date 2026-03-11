@@ -102,7 +102,7 @@ const MarqueeText = () => {
     ));
 
     return (
-        <div className="marquee-text-container">
+        <div className="marquee-text-container" style={{ backgroundColor: '#181717' }}>
             <div className="marquee-text-move">
                 {marqueeItems}
             </div>

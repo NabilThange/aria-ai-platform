@@ -112,10 +112,10 @@ function TasksPageContent() {
   };
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col bg-bytebot-bronze-light-1">
       <Header />
 
-      <main className="hide-scrollbar flex-1 overflow-y-auto px-6 pt-6 pb-10">
+      <main className="hide-scrollbar flex-1 overflow-y-auto bg-bytebot-bronze-light-1 px-6 pt-6 pb-10">
         <div className="mx-auto max-w-4xl">
           <h1 className="mb-6 text-xl font-medium text-bytebot-bronze-dark-7">Tasks</h1>
 

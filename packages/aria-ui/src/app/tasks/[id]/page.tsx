@@ -123,6 +123,7 @@ export default function TaskPage() {
     hasMoreMessages,
     isLoadingMoreMessages,
     loadMoreMessages,
+    isTaskInactive,
   ]);
 
   // Map each message ID to its flat index for screenshot scroll logic

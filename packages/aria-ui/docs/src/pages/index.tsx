@@ -16,7 +16,7 @@ function HomepageHeader() {
           Aria Documentation
         </Heading>
         <p className="hero__subtitle">
-          Open-source AI Desktop Agent powered by Google Gemini 2.0 — An AI that has its own computer to complete tasks for you
+          Open-source AI Desktop Agent — An AI that has its own computer to complete tasks for you
         </p>
         <div className={styles.buttons}>
           <Link
@@ -41,7 +41,7 @@ export default function Home(): ReactNode {
   return (
     <Layout
       title={`${siteConfig.title}`}
-      description="Internal documentation for the Aria project - AI Desktop Agent powered by Google Gemini 2.0">
+      description="Internal documentation for the Aria project - AI Desktop Agent">
       <HomepageHeader />
       <main>
         <div className="container" style={{marginTop: '3rem', marginBottom: '3rem'}}>
@@ -53,12 +53,12 @@ export default function Home(): ReactNode {
             </div>
             <div className="col col--4">
               <h3>🏗️ Architecture</h3>
-              <p>Understand how Aria's components work together: Next.js UI, NestJS backend, Gemini AI, and Ubuntu desktop.</p>
+              <p>Understand how Aria's components work together: Next.js UI, NestJS backend, AI engine, and Ubuntu desktop.</p>
               <Link to="/docs/docs/architecture">View Architecture →</Link>
             </div>
             <div className="col col--4">
               <h3>📊 Progress</h3>
-              <p>Track what's completed, in progress, and planned for the Gemini Live Agent Challenge submission.</p>
+              <p>Track what's completed, in progress, and planned for the project submission.</p>
               <Link to="/docs/docs/progress">View Progress →</Link>
             </div>
           </div>

@@ -88,7 +88,7 @@ const Activities = () => {
     });
 
     return (
-        <section className="activities-section w-full h-[120vh] p-8 mt-16 mb-20">
+        <section className="activities-section w-full h-[120vh] p-8 mt-16 mb-20" style={{ backgroundColor: '#181717' }}>
             <p className='text-[.7rem] font-bold text-[#eae5dd] activities-subtitle'>The 5-Layer Agent Pipeline</p>
             <div className="lg:mt-10 mt-7 activities-part origin-bottom">
                 {activitiesLines.map((line, index) => (

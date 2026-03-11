@@ -66,7 +66,7 @@ const Choose = () => {
     });
 
     return (
-        <section className="choose-section w-full h-dvh p-8 pt-10">
+        <section className="choose-section w-full h-dvh p-8 pt-10" style={{ background: 'linear-gradient(to bottom, #181717 0%, #181717 50%, #1f1d1b 65%, #1f1d1b 75%, #1f1d1b 85%, #1f1d1b 90%, #2b2825 100%)' }}>
             <div className='text-[.7rem] text-[#eae5dd] choose-subtitle'>Discover ARIA<span>®</span> Capabilities</div>
             <div className="lg:mt-10 mt-7 title-part origin-bottom ">
                 {

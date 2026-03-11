@@ -118,7 +118,7 @@ const Gallery = () => {
     };
 
     return (
-        <section className="gallery-page4" ref={pageRef}>
+        <section className="gallery-page4" ref={pageRef} style={{ backgroundColor: '#2b2825' }}>
             <div className="gallery-slider">
                 <div
                     className="gallery-box"

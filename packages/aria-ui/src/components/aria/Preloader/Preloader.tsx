@@ -18,9 +18,32 @@ export default function Preloader({ onComplete }: PreloaderProps) {
     // Prevent scrolling during preloader
     document.body.style.overflow = "hidden";
 
+    // Fallback timeout in case animation fails
+    const fallbackTimeout = setTimeout(() => {
+      console.warn('Preloader timeout reached, completing');
+      setIsComplete(true);
+      document.body.style.overflow = "";
+      onComplete?.();
+    }, 8000); // 8 seconds max
+
+    // Check if elements exist
+    const progressBar = document.querySelector('.preloader-progress-bar');
+    const progress = document.querySelector('.preloader-progress');
+    const mask = document.querySelector('.preloader-mask');
+    
+    if (!progressBar || !progress || !mask) {
+      console.error('Preloader elements not found, completing immediately');
+      clearTimeout(fallbackTimeout);
+      setIsComplete(true);
+      document.body.style.overflow = "";
+      onComplete?.();
+      return;
+    }
+
     const tl = gsap.timeline({
       delay: 0.3,
       onComplete: () => {
+        clearTimeout(fallbackTimeout);
         setIsComplete(true);
         document.body.style.overflow = "";
         // Call the callback after a small delay to ensure DOM is ready
@@ -67,10 +90,11 @@ export default function Preloader({ onComplete }: PreloaderProps) {
       );
 
     return () => {
+      clearTimeout(fallbackTimeout);
       tl.kill();
       document.body.style.overflow = "";
     };
-  }, []);
+  }, [onComplete]);
 
   if (isComplete) return null;
 

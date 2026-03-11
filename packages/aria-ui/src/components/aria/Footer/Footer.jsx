@@ -7,7 +7,7 @@ import MarqueeText from '../Marquee/MarqueeText';
 
 const Footer = () => {
     return (
-        <section className='w-screen h-dvh px-6 mt-10'>
+        <section className='w-screen h-dvh px-6 mt-10' style={{ backgroundColor: '#181717' }}>
             <div className='text-[.7rem] text-[#eae5dd] choose-subtitle mt-10'>Interested in an amazing adventure?<br />Reserve one of our ARIA<span>®</span></div>
             <div>
                 <MarqueeText />

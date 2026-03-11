@@ -1,13 +1,12 @@
-import type React from "react";
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
-
 export const metadata: Metadata = {
-  title: "Aria",
-  description: "Aria is the container for desktop agents.",
+  title: "ARIA — Tell it what you want. Watch it happen.",
+  description: "ARIA is a web-based AI browser agent. Speak a goal, watch ARIA execute it live in a real browser — transparent, interruptible, and collaborative.",
+  icons: {
+    icon: "/assets/favicon.ico",
+  },
 };
 
 export default function RootLayout({
@@ -16,10 +15,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className} suppressHydrationWarning>
-        {children}
-      </body>
+    <html lang="en">
+      <body style={{ margin: 0, padding: 0 }}>{children}</body>
     </html>
   );
 }

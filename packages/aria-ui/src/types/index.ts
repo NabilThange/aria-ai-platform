@@ -99,4 +99,5 @@ export interface Task {
   result?: unknown;
   model: Model;
   files?: File[];
+  planningEnabled?: boolean;
 }

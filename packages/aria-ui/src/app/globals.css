@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -48,7 +49,7 @@
   --color-bytebot-white: rgba(255, 255, 255, 1);
   --color-bytebot-transparent: rgba(255, 255, 255, 0);
   --color-bytebot-black: rgba(0, 0, 0, 1);
-  
+
   /* Bronze light */
   --color-bytebot-bronze-light-1: rgba(251, 249, 249, 1);
   --color-bytebot-bronze-light-2: rgba(246, 244, 244, 1);
@@ -100,7 +101,7 @@
   --color-bytebot-bronze-dark-a10: rgba(253, 231, 227, 0.48627451062202454);
   --color-bytebot-bronze-dark-a11: rgba(254, 241, 238, 0.7176470756530762);
   --color-bytebot-bronze-dark-a12: rgba(255, 254, 253, 0.9333333373069763);
-  
+
   /* Red light */
   --color-bytebot-red-light-9: rgba(229, 72, 77, 1);
   --color-bytebot-red-light-1: rgba(255, 252, 252, 1);
@@ -114,7 +115,7 @@
   --color-bytebot-red-light-10: rgba(220, 62, 66, 1);
   --color-bytebot-red-light-11: rgba(206, 44, 49, 1);
   --color-bytebot-red-light-12: rgba(100, 23, 35, 1);
-  
+
   /* Red dark */
   --color-bytebot-red-dark-1: rgba(23, 15, 14, 1);
   --color-bytebot-red-dark-2: rgba(32, 19, 18, 1);
@@ -128,7 +129,7 @@
   --color-bytebot-red-dark-10: rgba(230, 86, 91, 1);
   --color-bytebot-red-dark-11: rgba(255, 143, 139, 1);
   --color-bytebot-red-dark-12: rgba(255, 210, 206, 1);
-  
+
   /* Green */
   --color-bytebot-green-3: rgba(232, 247, 228, 1);
   --color-bytebot-green-4: rgba(218, 242, 211, 1);
@@ -200,6 +201,35 @@
   --sidebar-ring: oklch(0.709 0.01 56.259);
 }
 
+:root {
+  --base-100: #181717;
+  --base-200: #292725;
+  --base-300: #f5f5f5;
+}
+
+html,
+body {
+  font-family: "Inter", sans-serif;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  background-color: #181717;
+}
+
+/* Ensure the main app container also has dark background on landing */
+#__next:has(.landing-page-wrapper),
+main:has(.landing-page-wrapper),
+#__next:has(.landing-layout-root),
+main:has(.landing-layout-root) {
+  background-color: #181717 !important;
+}
+
+/* Landing page dark background - only applies within .aria-landing context */
+.aria-landing {
+  background-color: #181717 !important;
+  min-height: 100vh !important;
+}
+
 /* .dark {
   --background: oklch(0.147 0.004 49.25);
   --foreground: oklch(0.985 0.001 106.423);
@@ -239,7 +269,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
   }
 }
 

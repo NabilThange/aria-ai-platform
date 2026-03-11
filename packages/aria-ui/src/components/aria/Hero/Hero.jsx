@@ -3,6 +3,7 @@
 import gsap from "gsap/all";
 import { useGSAP } from "@gsap/react";
 import { useMediaQuery } from "react-responsive";
+import Image from "next/image";
 
 const Hero = () => {
 
@@ -33,18 +34,22 @@ const Hero = () => {
     }, [isMobHero]);
 
     return (
-        <section className="hero-section w-dvw md:h-dvh h-[100vh] md:p-2 p-2.5 mb-20">
+        <section className="hero-section w-dvw md:h-dvh h-[100vh] md:p-2 p-2.5 mb-20" style={{ backgroundColor: '#181717' }}>
             <div className="relative w-full h-full rounded-[2.5rem] overflow-hidden">
                 <div className="responsive-mobile">
                     {/* Background image (down layer) */}
                     <div className="hero-img absolute inset-0 bg-[url('/aria-assets/cap11.png')] bg-no-repeat bg-cover bg-center z-0 md:block hidden" />
 
                     {/* Mobile image fallback */}
-                    <div className="block lg:hidden mt-6 mb-6">
-                        <img
+                    <div className="block lg:hidden mt-6 mb-6 relative w-full h-80">
+                        <Image
                             src="/aria-assets/hero-mobile.png"
                             alt="mobile bg"
-                            className="w-full rounded-[2rem] object-cover shadow-[0_-25px_45px_-10px_rgba(255,0,0,0.15)]"
+                            fill
+                            className="rounded-[2rem] object-cover shadow-[0_-25px_45px_-10px_rgba(255,0,0,0.15)]"
+                            priority={true}
+                            loading="eager"
+                            sizes="100vw"
                         />
                     </div>
 

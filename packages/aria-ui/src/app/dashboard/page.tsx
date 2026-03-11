@@ -141,10 +141,10 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-screen flex-col overflow-hidden bg-bytebot-bronze-light-1" style={{ backgroundColor: '#f5f5f5', minHeight: '100vh' }}>
       <Header />
 
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex flex-1 flex-col overflow-hidden bg-bytebot-bronze-light-1" style={{ backgroundColor: '#f5f5f5' }}>
         {/* Desktop grid layout (50/50 split) - only visible on large screens */}
         <div className="hidden h-full p-8 lg:grid lg:grid-cols-2 lg:gap-8">
           {/* Main content area */}
@@ -203,7 +203,7 @@ export default function Home() {
                 </h1>
               </div>
 
-              <div className="bg-bytebot-bronze-light-2 border-bytebot-bronze-light-5 borderw-full mb-10 rounded-2xl p-2">
+              <div className="border-bytebot-bronze-light-5 mb-10 w-full rounded-2xl border bg-bytebot-bronze-light-2 p-2">
                 <ChatInput
                   input={input}
                   isLoading={isLoading}

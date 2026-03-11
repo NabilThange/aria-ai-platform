@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowRight02Icon, Attachment01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
+import { ArrowRight02Icon, Attachment01Icon, Cancel01Icon, BrainIcon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 
 interface FileWithBase64 {
@@ -166,23 +166,22 @@ export function ChatInput({
       
       {/* Planning Toggle */}
       {onPlanningToggle && (
-        <div className="mb-2 flex items-center gap-2">
-          <label className="flex cursor-pointer items-center gap-2">
+        <div className="mb-2 flex items-center gap-1.5">
+          <label className="flex cursor-pointer items-center gap-1.5">
             <input
               type="checkbox"
               checked={planningEnabled}
               onChange={(e) => onPlanningToggle(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-bytebot-bronze-dark-7 focus:ring-bytebot-bronze-dark-7"
+              className="h-3.5 w-3.5 rounded border-bytebot-bronze-light-7 text-bytebot-bronze-dark-7 focus:ring-bytebot-bronze-dark-7"
             />
-            <span className="text-sm text-bytebot-bronze-dark-7">
-              Enable Planning Mode
+            <HugeiconsIcon
+              icon={BrainIcon}
+              className="h-3.5 w-3.5 text-bytebot-bronze-dark-7"
+            />
+            <span className="text-xs text-bytebot-bronze-dark-7">
+              Extended Thinking
             </span>
           </label>
-          {planningEnabled && (
-            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
-              Plan first, then execute
-            </span>
-          )}
         </div>
       )}
       

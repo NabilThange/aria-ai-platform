@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { ClientOnly } from "@/components/aria/ClientOnly";
+import "./landing.css";
 
 // Import components directly - they all have "use client" and SSR guards
 import Preloader from "@/components/aria/Preloader/Preloader";
@@ -38,7 +39,7 @@ export default function LandingPage() {
 
   return (
     <ClientOnly>
-      <div style={{ position: 'relative', width: '100%', minHeight: '100vh' }}>
+      <div className="landing-page-wrapper" style={{ backgroundColor: '#181717', minHeight: '100vh', width: '100%', position: 'relative' }}>
         {!preloaderComplete && <Preloader onComplete={handlePreloaderComplete} />}
         {preloaderComplete && (
           <AriaLayout>

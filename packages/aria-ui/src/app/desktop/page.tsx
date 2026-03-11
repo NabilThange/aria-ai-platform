@@ -24,10 +24,10 @@ export default function DesktopPage() {
   };
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-screen flex-col overflow-hidden bg-bytebot-bronze-light-1">
       <Header />
 
-      <main className="m-2 flex-1 overflow-hidden px-2 py-4">
+      <main className="m-2 flex-1 overflow-hidden bg-bytebot-bronze-light-1 px-2 py-4">
         <div className="flex h-full flex-col gap-4">
           {/* Mode Toggle Section */}
           <div className="flex items-center justify-center gap-4">

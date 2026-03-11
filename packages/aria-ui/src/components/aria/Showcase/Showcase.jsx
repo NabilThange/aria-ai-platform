@@ -5,6 +5,7 @@ import gsap from "gsap";
 import ScrollToPlugin from "gsap/ScrollToPlugin";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useRef } from "react";
+import Image from "next/image";
 
 gsap.registerPlugin(ScrollTrigger, ScrollToPlugin);
 
@@ -68,6 +69,7 @@ const Showcase = () => {
         <section
             ref={containerRef}
             className='relative w-full h-dvh overflow-hidden mt-20'
+            style={{ backgroundColor: '#181717' }}
         >
             <div
                 ref={imgConRef}
@@ -79,10 +81,14 @@ const Showcase = () => {
                         <h1 className="text-3xl font-bold">Intent<br /> Understanding</h1>
                         <p className="border-[1px] rounded-3xl px-2 py-1 text-center text-[0.7rem]">Layer 1</p>
                     </div>
-                    <img
+                    <Image
                         src="/aria-assets/activities-1.png"
                         alt="Activity 1"
-                        className="image-item w-full h-full object-cover rounded-[2.5rem]"
+                        fill
+                        className="image-item object-cover rounded-[2.5rem]"
+                        priority={false}
+                        loading="lazy"
+                        sizes="80vw"
                     />
                     <div className="w-[77vw] absolute bottom-10 left-5 flex justify-between items-start ">
                         <p className="text-[0.68rem] font-bold text-[#f4efe7]">ARIA clarifies ambiguous goals by asking smart follow-up<br />questions before building an execution plan.</p>
@@ -99,10 +105,14 @@ const Showcase = () => {
                         <h1 className="text-3xl font-bold">Plan<br />Approval</h1>
                         <p className="border-[1px] rounded-3xl px-2 py-1 text-center text-[0.7rem]">Layer 2</p>
                     </div>
-                    <img
+                    <Image
                         src="/aria-assets/activities-2.png"
                         alt="Activity 2"
-                        className="image-item w-full h-full object-cover rounded-[2.5rem]"
+                        fill
+                        className="image-item object-cover rounded-[2.5rem]"
+                        priority={false}
+                        loading="lazy"
+                        sizes="80vw"
                     />
                     <div className="w-[77vw] absolute bottom-10 left-5 flex justify-between items-start ">
                         <p className="text-[0.68rem] font-bold text-[#f4efe7]">You approve the step-by-step plan before any browser<br />actions are executed—full transparency and control.</p>
@@ -119,10 +129,14 @@ const Showcase = () => {
                         <h1 className="text-3xl font-bold">Live<br /> Execution</h1>
                         <p className="border-[1px] rounded-3xl px-2 py-1 text-center text-[0.7rem]">Layer 3</p>
                     </div>
-                    <img
+                    <Image
                         src="/aria-assets/activities-3.png"
                         alt="Activity 3"
-                        className="image-item w-full h-full object-cover rounded-[2.5rem]"
+                        fill
+                        className="image-item object-cover rounded-[2.5rem]"
+                        priority={false}
+                        loading="lazy"
+                        sizes="80vw"
                     />
                     <div className="w-[77vw] absolute bottom-10 left-5 flex justify-between items-start ">
                         <p className="text-[0.68rem] font-bold text-[#f4efe7]">Watch ARIA execute tasks live in a sandboxed browser<br />with WebRTC streaming and pixel-perfect precision.</p>
