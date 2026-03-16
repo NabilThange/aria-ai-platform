@@ -15,5 +15,6 @@ services:
     privileged: true
     ports:
       - "9990:9990" # ariad service & noVNC
+      - "9867:9867" # PinchTab
     environment:
       - DISPLAY=:0

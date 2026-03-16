@@ -1,0 +1,60 @@
+---
+title: 'text-to-speech'
+description: Convert text into natural-sounding speech for applications like virtual assistants, accessibility features, and content creation
+icon: 'volume-high'
+mode: 'wide'
+---
+
+<AccordionGroup>
+	<Accordion defaultOpen="true" title="Basic usage">
+		Send a text input to generate an audio output
+		<CodeGroup>
+			```javascript javascript
+			import Bytez from 'bytez.js';
+			
+			// insert your key
+			const sdk = new Bytez('BYTEZ_KEY');
+			
+			// choose your model
+			const model = sdk.model('suno/bark-small');
+			
+			// provide the model with input
+			const input = "Hello, how are you today?";
+			
+			// send to the model
+			const { error, output } = await model.run(input);
+			
+			// observe the output
+			console.log({ error, output });
+			
+			```
+			```python python
+			from bytez import Bytez
+			
+			# insert your key
+			sdk = Bytez("BYTEZ_KEY")
+			
+			# choose your model
+			model = sdk.model("suno/bark-small")
+			
+			# provide the model with input
+			input = "Hello, how are you today?"
+			
+			# send to the model
+			result = model.run(input)
+			
+			# observe the output
+			print({"error": result.error, "output": result.output})
+			
+			```
+			```bash http
+			curl -X POST 'https://api.bytez.com/models/v2/suno/bark-small' \
+			-H 'Authorization: BYTEZ_KEY' \
+			-H 'Content-Type: application/json' \
+			--data '{
+			  "text": "Hello, how are you today?"
+			}'
+			```
+		</CodeGroup>
+	</Accordion>
+</AccordionGroup>

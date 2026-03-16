@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Message, Role, Prisma } from '@prisma/client';
 import {
   MessageContentBlock,
+  MessageContentType,
   isComputerToolUseContentBlock,
   isToolResultContentBlock,
   isUserActionContentBlock,
@@ -49,6 +50,107 @@ export class MessagesService {
     this.tasksGateway.emitNewMessage(data.taskId, message);
 
     return message;
+  }
+
+  /**
+   * Create an agent action message (for multi-agent system)
+   * Converts agent actions into message content blocks
+   */
+  async createAgentActionMessage(
+    taskId: string,
+    agentName: 'CLARIFIER' | 'ORCHESTRATOR' | 'WEB' | 'DESKTOP' | 'PERCEPTION' | 'VERIFIER' | 'RECOVERY' | 'REPORTER',
+    actionType: 'thinking' | 'plan' | 'verify' | 'question' | 'recovery' | 'report' | 'computer_action',
+    actionData: any,
+  ): Promise<Message> {
+    const timestamp = new Date().toISOString();
+    const contentBlocks: MessageContentBlock[] = [];
+
+    // Build content blocks based on action type
+    switch (actionType) {
+      case 'thinking':
+        contentBlocks.push({
+          type: MessageContentType.AgentThinking,
+          agent: agentName,
+          thinking: actionData.thinking,
+          timestamp,
+        } as any);
+        break;
+
+      case 'plan':
+        contentBlocks.push({
+          type: MessageContentType.AgentPlan,
+          agent: agentName,
+          plan: actionData.plan,
+          timestamp,
+        } as any);
+        break;
+
+      case 'verify':
+        contentBlocks.push({
+          type: MessageContentType.AgentVerify,
+          agent: agentName,
+          verification: actionData.verification,
+          timestamp,
+        } as any);
+        break;
+
+      case 'question':
+        contentBlocks.push({
+          type: MessageContentType.AgentQuestion,
+          agent: agentName,
+          question: actionData.question,
+          timestamp,
+        } as any);
+        break;
+
+      case 'recovery':
+        contentBlocks.push({
+          type: MessageContentType.AgentRecovery,
+          agent: agentName,
+          strategy: actionData.strategy,
+          timestamp,
+        } as any);
+        break;
+
+      case 'report':
+        contentBlocks.push({
+          type: MessageContentType.AgentReport,
+          agent: agentName,
+          report: actionData.report,
+          timestamp,
+        } as any);
+        break;
+
+      case 'computer_action':
+        // For computer actions, use existing ComputerToolUseContentBlock
+        if (actionData.toolUseBlock) {
+          contentBlocks.push(actionData.toolUseBlock as any);
+        }
+        // Add screenshot if present
+        if (actionData.screenshot) {
+          contentBlocks.push({
+            type: MessageContentType.ToolResult,
+            tool_use_id: actionData.toolUseBlock?.id || 'screenshot',
+            content: [
+              {
+                type: MessageContentType.Image,
+                source: {
+                  type: 'base64',
+                  media_type: 'image/png',
+                  data: actionData.screenshot,
+                },
+              } as any,
+            ],
+          } as any);
+        }
+        break;
+    }
+
+    return this.create({
+      content: contentBlocks,
+      role: Role.ASSISTANT,
+      taskId,
+    });
   }
 
   async findEvery(taskId: string): Promise<Message[]> {

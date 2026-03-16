@@ -4,7 +4,7 @@ export type Coordinates = {
 };
 export type Button = "left" | "right" | "middle";
 export type Press = "up" | "down";
-export type Application = "firefox" | "1password" | "thunderbird" | "vscode" | "terminal" | "desktop" | "directory";
+export type Application = "chromium" | "gmail" | "vscode" | "terminal" | "thunar" | "mousepad" | "desktop";
 export type MoveMouseAction = {
     action: "move_mouse";
     coordinates: Coordinates;

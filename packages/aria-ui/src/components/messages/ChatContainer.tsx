@@ -5,6 +5,7 @@ import { TextShimmer } from "../ui/text-shimmer";
 import { MessageAvatar } from "./MessageAvatar";
 import { Loader } from "../ui/loader";
 import { ChatInput } from "./ChatInput";
+import { ToolCallContent } from "./content/ToolCallContent";
 
 interface ChatContainerProps {
   scrollRef?: React.RefObject<HTMLDivElement | null>;
@@ -15,6 +16,7 @@ interface ChatContainerProps {
   isLoading: boolean;
   handleAddMessage: () => Promise<void>;
   groupedMessages: GroupedMessages[];
+  toolCalls?: Map<string, any>;
   taskStatus: TaskStatus;
   control: Role;
   isLoadingSession: boolean;
@@ -31,12 +33,14 @@ export function ChatContainer({
   isLoading,
   handleAddMessage,
   groupedMessages,
+  toolCalls,
   taskStatus,
   control,
   isLoadingSession,
   isLoadingMoreMessages,
   hasMoreMessages,
   loadMoreMessages,
+  taskId,
 }: ChatContainerProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -99,6 +103,24 @@ export function ChatContainer({
                 />
               </Fragment>
             ))}
+
+            {/* Tool Calls - Inline with messages */}
+            {toolCalls && toolCalls.size > 0 && (
+              <div className="border-bytebot-bronze-light-7 border-x px-4 py-2">
+                {Array.from(toolCalls.values()).map((toolCall, index) => (
+                  <ToolCallContent
+                    key={`${toolCall.agentName}-${toolCall.toolName}-${toolCall.timestamp}-${index}`}
+                    agentName={toolCall.agentName}
+                    toolName={toolCall.toolName}
+                    toolInput={toolCall.toolInput}
+                    success={toolCall.success}
+                    output={toolCall.output}
+                    error={toolCall.error}
+                    duration={toolCall.duration}
+                  />
+                ))}
+              </div>
+            )}
 
             {taskStatus === TaskStatus.RUNNING &&
               control === Role.ASSISTANT && (

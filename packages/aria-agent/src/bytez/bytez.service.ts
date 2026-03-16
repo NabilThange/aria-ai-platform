@@ -46,6 +46,12 @@ export class BytezService implements BytebotAgentService {
     useTools: boolean = true,
     signal?: AbortSignal,
   ): Promise<BytebotAgentResponse> {
+    this.logger.log(`🔌 [BytezService] API call initiated`);
+    this.logger.log(`   Model: ${model}`);
+    this.logger.log(`   Use Tools: ${useTools}`);
+    this.logger.log(`   Messages: ${messages.length}`);
+    this.logger.log(`   System Prompt: ${systemPrompt?.substring(0, 100)}...`);
+    
     const maxRetries = this.keyManager.getTotalKeys();
     let lastError: Error | null = null;
 
@@ -66,22 +72,90 @@ export class BytezService implements BytebotAgentService {
           throw new Error(`Invalid model format: ${model}. Expected format: provider/model-name`);
         }
 
-        // Use OpenAI-compatible endpoint for tool calling
-        const endpoint = useTools 
-          ? 'https://api.bytez.com/models/v2/openai/v1/chat/completions'
-          : `${this.baseUrl}/${provider}/${modelName}`;
+        // Determine endpoint based on provider
+        // For Anthropic models, ALWAYS use native endpoint (supports images + tools)
+        // For other providers, use OpenAI-compatible endpoint when tools are needed
+        const useNativeAnthropicEndpoint = provider === 'anthropic';
+        const endpoint = useNativeAnthropicEndpoint
+          ? `${this.baseUrl}/${provider}/${modelName}`
+          : useTools 
+            ? 'https://api.bytez.com/models/v2/openai/v1/chat/completions'
+            : `${this.baseUrl}/${provider}/${modelName}`;
 
         const requestBody: any = {
           messages: bytezMessages,
           max_tokens: 8192,
         };
 
-        // Add model for OpenAI-compatible endpoint
-        if (useTools) {
+        // Configure request based on endpoint type
+        if (useNativeAnthropicEndpoint) {
+          // Native Anthropic endpoint: Use params object for tools
+          if (useTools) {
+            requestBody.params = {
+              max_tokens: 8192,
+              tools: this.getAnthropicTools(),
+              tool_choice: { type: 'auto' },
+            };
+          }
+          // System prompt will be extracted and added as requestBody.system below
+        } else if (useTools) {
+          // OpenAI-compatible endpoint: Use top-level tools
           requestBody.model = model;
           requestBody.tools = this.getComputerUseTools();
           requestBody.tool_choice = 'auto';
         }
+
+        // Handle system prompt extraction for native Anthropic endpoint
+        if (provider === 'anthropic') {
+          // For native Anthropic endpoint, system prompt goes as separate parameter
+          // Remove system message from messages array if present
+          const systemMessageIndex = bytezMessages.findIndex(m => m.role === 'system');
+          this.logger.debug(`System message index: ${systemMessageIndex}, Total messages before extraction: ${bytezMessages.length}`);
+          if (systemMessageIndex !== -1) {
+            const systemMessage = bytezMessages.splice(systemMessageIndex, 1)[0];
+            requestBody.system = systemMessage.content;
+            this.logger.debug(`Extracted system message, remaining messages: ${bytezMessages.length}`);
+          }
+        } else if (provider === 'google') {
+          // For Google Gemini, system prompt can stay in messages array
+          // Gemini accepts system messages in the standard format
+          this.logger.debug(`Using Google Gemini - keeping system message in messages array`);
+        } else {
+          // For open-source models (Qwen, Llama, etc.), keep system message in messages array
+          this.logger.debug(`Using open-source model (${provider}) - keeping system message in messages array`);
+        }
+
+        // Validate we have at least one message
+        if (requestBody.messages.length === 0) {
+          this.logger.error(`Empty messages array! bytezMessages length: ${bytezMessages.length}`);
+          throw new Error('Cannot send request with empty messages array. This indicates a message formatting issue.');
+        }
+
+        // DEBUG: Log the exact request being sent to Bytez (WITHOUT full image data to avoid huge logs)
+        this.logger.debug(`📤 Sending request to Bytez:`);
+        this.logger.debug(`   Endpoint: ${endpoint}`);
+        this.logger.debug(`   Messages count: ${requestBody.messages.length}`);
+        requestBody.messages.forEach((msg: any, idx: number) => {
+          this.logger.debug(`   Message ${idx}: role=${msg.role}, contentType=${typeof msg.content}, isArray=${Array.isArray(msg.content)}`);
+          if (Array.isArray(msg.content)) {
+            this.logger.debug(`      Content array length: ${msg.content.length}`);
+            msg.content.forEach((part: any, partIdx: number) => {
+              if (part.type === 'image') {
+                // Don't log full image data - just log that it exists
+                const dataSize = part.source?.data ? `${(part.source.data.length / 1024).toFixed(1)}KB` : 'unknown';
+                this.logger.debug(`      Part ${partIdx}: type=image, media_type=${part.source?.media_type}, size=${dataSize}`);
+              } else if (part.type === 'text') {
+                const textPreview = part.text?.substring(0, 100) || '';
+                this.logger.debug(`      Part ${partIdx}: type=text, length=${part.text?.length || 0}, preview="${textPreview}..."`);
+              } else {
+                this.logger.debug(`      Part ${partIdx}: type=${part.type}`);
+              }
+            });
+          } else if (typeof msg.content === 'string') {
+            const preview = msg.content.substring(0, 100);
+            this.logger.debug(`      Content: string, length=${msg.content.length}, preview="${preview}..."`);
+          }
+        });
 
         const response = await fetch(endpoint, {
           method: 'POST',
@@ -105,16 +179,40 @@ export class BytezService implements BytebotAgentService {
           continue;
         }
 
-        const data = await response.json();
+        const data = await response.json() as any;
+
+        // Handle native Anthropic endpoint response (when using native endpoint)
+        if (useNativeAnthropicEndpoint && useTools) {
+          // Mark key as successful
+          this.keyManager.markCurrentKeyAsSuccessful();
+          
+          // LOG ACTUAL RESPONSE CONTENT
+          this.logger.log(`📝 [BytezService] Native Anthropic response:`);
+          const providerContentPreview = JSON.stringify(data.provider?.content || []).substring(0, 500);
+          this.logger.log(`   Provider content: ${providerContentPreview}${providerContentPreview.length >= 500 ? '...[truncated]' : ''}`);
+          const outputPreview = JSON.stringify(data.output || {}).substring(0, 500);
+          this.logger.log(`   Output: ${outputPreview}${outputPreview.length >= 500 ? '...[truncated]' : ''}`);
+          
+          return this.formatNativeAnthropicResponse(data);
+        }
 
         // Handle OpenAI-compatible response format
         if (useTools && data.choices) {
           // Mark key as successful
           this.keyManager.markCurrentKeyAsSuccessful();
+          
+          // LOG ACTUAL RESPONSE CONTENT
+          this.logger.log(`📝 [BytezService] OpenAI-format response:`);
+          this.logger.log(`   Message content: ${data.choices[0]?.message?.content || '(empty)'}`);
+          if (data.choices[0]?.message?.tool_calls) {
+            const toolCallsPreview = JSON.stringify(data.choices[0].message.tool_calls, null, 2).substring(0, 500);
+            this.logger.log(`   Tool calls: ${toolCallsPreview}${toolCallsPreview.length >= 500 ? '...[truncated]' : ''}`);
+          }
+          
           return this.formatOpenAIResponse(data);
         }
 
-        // Handle native Bytez response format
+        // Handle native Bytez response format (non-tool, non-Anthropic)
         if (data.error) {
           const error = new Error(`Bytez error: ${data.error}`);
           this.keyManager.markCurrentKeyAsFailed(error);
@@ -131,6 +229,16 @@ export class BytezService implements BytebotAgentService {
 
         // Mark key as successful
         this.keyManager.markCurrentKeyAsSuccessful();
+        
+        // LOG ACTUAL RESPONSE CONTENT
+        this.logger.log(`✅ [BytezService] API call successful`);
+        this.logger.log(`   Input tokens: ${data.provider?.usage?.input_tokens || 0}`);
+        this.logger.log(`   Output tokens: ${data.provider?.usage?.output_tokens || 0}`);
+        
+        // LOG ACTUAL RESPONSE CONTENT (truncated to avoid huge logs)
+        this.logger.log(`📝 [BytezService] Response content:`);
+        const outputPreview = JSON.stringify(data.output, null, 2).substring(0, 500);
+        this.logger.log(outputPreview + (outputPreview.length >= 500 ? '\n...[truncated]' : ''));
         
         return {
           contentBlocks: this.formatBytezResponse(data.output),
@@ -174,6 +282,10 @@ export class BytezService implements BytebotAgentService {
   private formatMessagesForBytez(messages: Message[], systemPrompt: string): any[] {
     const bytezMessages: any[] = [];
 
+    this.logger.debug(`formatMessagesForBytez called with ${messages.length} messages`);
+    this.logger.debug(`System prompt length: ${systemPrompt?.length || 0}`);
+    this.logger.debug(`Input messages structure: ${JSON.stringify(messages.map(m => ({ role: m.role, contentType: typeof m.content, contentLength: Array.isArray(m.content) ? m.content.length : 'not-array' })))}`);
+
     // Add system prompt as first message
     if (systemPrompt) {
       bytezMessages.push({
@@ -183,7 +295,9 @@ export class BytezService implements BytebotAgentService {
     }
 
     for (const message of messages) {
+      this.logger.debug(`Processing message with role: ${message.role}`);
       const messageContentBlocks = message.content as MessageContentBlock[];
+      this.logger.debug(`Content blocks: ${messageContentBlocks?.length || 'null/undefined'}`);
 
       // Handle user action blocks
       if (
@@ -201,11 +315,25 @@ export class BytezService implements BytebotAgentService {
               text: `User performed action: ${block.name}\n${JSON.stringify(block.input, null, 2)}`,
             });
           } else if (isImageContentBlock(block)) {
-            // Bytez native image format
-            contentParts.push({
-              type: 'image',
-              url: `data:${block.source.media_type};base64,${block.source.data}`,
-            });
+            // Anthropic native image format
+            if (block.source.data) {
+              contentParts.push({
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: block.source.media_type,
+                  data: block.source.data,
+                },
+              });
+            } else if ((block.source as any).url) {
+              contentParts.push({
+                type: 'image',
+                source: {
+                  type: 'url',
+                  url: (block.source as any).url,
+                },
+              });
+            }
           }
         }
 
@@ -248,11 +376,27 @@ export class BytezService implements BytebotAgentService {
               });
               textParts.length = 0;
             }
-            // Bytez native image format
-            contentParts.push({
-              type: 'image',
-              url: `data:${block.source.media_type};base64,${block.source.data}`,
-            });
+            // Anthropic native format: use base64 or url
+            if (block.source.data) {
+              // Base64 image
+              contentParts.push({
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: block.source.media_type,
+                  data: block.source.data,
+                },
+              });
+            } else if ((block.source as any).url) {
+              // URL-based image
+              contentParts.push({
+                type: 'image',
+                source: {
+                  type: 'url',
+                  url: (block.source as any).url,
+                },
+              });
+            }
             break;
           case MessageContentType.ToolResult: {
             // For OpenAI format, tool results are separate messages
@@ -305,10 +449,12 @@ export class BytezService implements BytebotAgentService {
 
       // Skip tool result messages as they were already added above
       if (messageContentBlocks.some(b => b.type === MessageContentType.ToolResult)) {
+        this.logger.debug(`Skipping message - contains ToolResult`);
         continue;
       }
 
       if (message.role === Role.ASSISTANT) {
+        this.logger.debug(`Processing ASSISTANT message - toolCalls: ${toolCalls.length}, hasImage: ${hasImage}, contentParts: ${contentParts.length}, textParts: ${textParts.length}`);
         const assistantMessage: any = {
           role: 'assistant',
         };
@@ -327,21 +473,110 @@ export class BytezService implements BytebotAgentService {
           bytezMessages.push(assistantMessage);
         }
       } else if (message.role === Role.USER) {
+        this.logger.debug(`Adding USER message - hasImage: ${hasImage}, contentParts: ${contentParts.length}, textParts: ${textParts.length}`);
         if (hasImage && contentParts.length > 0) {
+          // Validate content parts before adding
+          const validContentParts = contentParts.filter(part => {
+            if (!part || typeof part !== 'object') {
+              this.logger.warn(`Invalid content part (not an object): ${typeof part}`);
+              return false;
+            }
+            if (!part.type) {
+              this.logger.warn(`Content part missing type`);
+              return false;
+            }
+            if (part.type === 'text' && !part.text) {
+              this.logger.warn(`Text content part missing text field`);
+              return false;
+            }
+            if (part.type === 'image' && !part.url) {
+              this.logger.warn(`Image content part missing url field`);
+              return false;
+            }
+            return true;
+          });
+
+          if (validContentParts.length === 0) {
+            this.logger.error(`All content parts were invalid! Count: ${contentParts.length}, Types: ${contentParts.map(p => p?.type || 'unknown').join(', ')}`);
+            throw new Error('Cannot create USER message with no valid content parts');
+          }
+
           bytezMessages.push({
             role: 'user',
-            content: contentParts,
+            content: validContentParts,
           });
         } else if (textParts.length > 0) {
           bytezMessages.push({
             role: 'user',
             content: textParts.join('\n\n'),
           });
+        } else {
+          this.logger.warn(`USER message skipped - no content to add`);
         }
       }
     }
 
+    this.logger.debug(`formatMessagesForBytez returning ${bytezMessages.length} messages`);
+    this.logger.debug(`Message roles: ${bytezMessages.map(m => m.role).join(', ')}`);
+    if (bytezMessages.length === 0) {
+      this.logger.error('formatMessagesForBytez produced EMPTY messages array!');
+      this.logger.error(`Input messages: ${JSON.stringify(messages, null, 2)}`);
+    }
+
     return bytezMessages;
+  }
+
+  /**
+   * Format response from native Anthropic endpoint
+   * Tool calls are in data.provider.content, text may be in data.output.content
+   */
+  private formatNativeAnthropicResponse(data: any): BytebotAgentResponse {
+    const blocks: MessageContentBlock[] = [];
+
+    // Extract content from provider (where tool_use blocks live)
+    const providerContent = data.provider?.content || [];
+    
+    // Extract content from output (where text may be)
+    const outputContent = data.output?.content || [];
+
+    // Merge both sources
+    const allContent = Array.isArray(providerContent) ? providerContent : [];
+    if (Array.isArray(outputContent)) {
+      allContent.push(...outputContent);
+    } else if (typeof outputContent === 'string') {
+      allContent.push({ type: 'text', text: outputContent });
+    }
+
+    // Process content blocks
+    for (const block of allContent) {
+      if (!block || typeof block !== 'object') continue;
+
+      if (block.type === 'text' && block.text) {
+        blocks.push({
+          type: MessageContentType.Text,
+          text: block.text,
+        } as TextContentBlock);
+      } else if (block.type === 'tool_use') {
+        // Parse tool_use block from Anthropic format
+        blocks.push({
+          type: MessageContentType.ToolUse,
+          id: block.id,
+          name: block.name,
+          input: block.input || {},
+        } as ToolUseContentBlock);
+      }
+    }
+
+    return {
+      contentBlocks: blocks,
+      tokenUsage: {
+        inputTokens: data.provider?.usage?.input_tokens || 0,
+        outputTokens: data.provider?.usage?.output_tokens || 0,
+        totalTokens:
+          (data.provider?.usage?.input_tokens || 0) +
+          (data.provider?.usage?.output_tokens || 0),
+      },
+    };
   }
 
   private formatBytezResponse(output: any): MessageContentBlock[] {
@@ -398,153 +633,47 @@ export class BytezService implements BytebotAgentService {
       {
         type: 'function',
         function: {
-          name: 'computer_screenshot',
-          description: 'Captures a screenshot of the current screen',
-          parameters: {
-            type: 'object',
-            properties: {},
-            required: [],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'computer_left_click',
-          description: 'Performs a left mouse click at the specified coordinates',
+          name: 'computer',
+          description: 'Control mouse and keyboard to interact with the desktop. Use this to click, type, paste, press keys, and take screenshots.',
           parameters: {
             type: 'object',
             properties: {
+              action: {
+                type: 'string',
+                enum: ['click', 'double_click', 'right_click', 'type', 'paste', 'key', 'screenshot', 'scroll', 'application', 'terminal_command'],
+                description: 'The action to perform: click (left click), double_click, right_click, type (type text slowly), paste (paste text fast via clipboard), key (press key/combo), screenshot, scroll, application (open app), terminal_command (run command in terminal)',
+              },
               x: {
-                type: 'number',
-                description: 'X coordinate for the click',
+                type: 'integer',
+                description: 'X coordinate for mouse actions (click, double_click, right_click, scroll)',
               },
               y: {
-                type: 'number',
-                description: 'Y coordinate for the click',
+                type: 'integer',
+                description: 'Y coordinate for mouse actions (click, double_click, right_click, scroll)',
               },
-            },
-            required: ['x', 'y'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'computer_right_click',
-          description: 'Performs a right mouse click at the specified coordinates',
-          parameters: {
-            type: 'object',
-            properties: {
-              x: {
-                type: 'number',
-                description: 'X coordinate for the click',
-              },
-              y: {
-                type: 'number',
-                description: 'Y coordinate for the click',
-              },
-            },
-            required: ['x', 'y'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'computer_double_click',
-          description: 'Performs a double click at the specified coordinates',
-          parameters: {
-            type: 'object',
-            properties: {
-              x: {
-                type: 'number',
-                description: 'X coordinate for the double click',
-              },
-              y: {
-                type: 'number',
-                description: 'Y coordinate for the double click',
-              },
-            },
-            required: ['x', 'y'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'computer_type_text',
-          description: 'Types a string of text character by character',
-          parameters: {
-            type: 'object',
-            properties: {
               text: {
                 type: 'string',
-                description: 'The text to type',
+                description: 'Text to type/paste (for type or paste action) or key to press (for key action, e.g., "Return", "ctrl+c"). Use paste for long text (faster), type for short text.',
               },
-              isSensitive: {
-                type: 'boolean',
-                description: 'Whether the text is sensitive (e.g., password)',
-              },
-            },
-            required: ['text'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'computer_type_keys',
-          description: 'Types a sequence of keys (useful for keyboard shortcuts)',
-          parameters: {
-            type: 'object',
-            properties: {
-              keys: {
-                type: 'array',
-                items: { type: 'string' },
-                description: 'Array of key names to press',
-              },
-            },
-            required: ['keys'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'computer_application',
-          description: 'Opens or switches to an application',
-          parameters: {
-            type: 'object',
-            properties: {
-              application: {
-                type: 'string',
-                description: 'Name of the application to open',
-              },
-            },
-            required: ['application'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'computer_scroll',
-          description: 'Scrolls the screen',
-          parameters: {
-            type: 'object',
-            properties: {
               direction: {
                 type: 'string',
-                enum: ['up', 'down', 'left', 'right'],
-                description: 'Direction to scroll',
+                enum: ['up', 'down'],
+                description: 'Scroll direction (for scroll action)',
               },
               amount: {
-                type: 'number',
-                description: 'Amount to scroll',
+                type: 'integer',
+                description: 'Scroll amount in lines (for scroll action)',
+              },
+              application: {
+                type: 'string',
+                description: 'Application name to open (for application action, e.g., "chromium", "terminal", "vscode")',
+              },
+              command: {
+                type: 'string',
+                description: 'Terminal command to run (for terminal_command action, e.g., "ls -la", "npm install")',
               },
             },
-            required: ['direction'],
+            required: ['action'],
           },
         },
       },
@@ -552,22 +681,95 @@ export class BytezService implements BytebotAgentService {
         type: 'function',
         function: {
           name: 'set_task_status',
-          description: 'Set the status of the current task. Use this when the task is completed, needs help, or has failed. ALWAYS call this as your final action.',
+          description: 'Mark the current step as completed or failed. Use this when the success criteria is met or when the step cannot be completed.',
           parameters: {
             type: 'object',
             properties: {
               status: {
                 type: 'string',
-                enum: ['completed', 'failed', 'needs_help'],
-                description: 'The status of the task',
+                enum: ['completed', 'failed'],
+                description: 'The status: completed (success criteria met) or failed (cannot complete)',
               },
-              description: {
+              message: {
                 type: 'string',
-                description: 'A brief description or summary of what was accomplished or what help is needed',
+                description: 'Brief message explaining the status (what was accomplished or why it failed)',
               },
             },
-            required: ['status', 'description'],
+            required: ['status', 'message'],
           },
+        },
+      },
+    ];
+  }
+
+  /**
+   * Get tools in Anthropic native format (for native Anthropic endpoint)
+   * Uses input_schema instead of parameters
+   * Based on desktop.tools.ts structure - unified 'computer' tool + set_task_status
+   */
+  private getAnthropicTools(): any[] {
+    return [
+      {
+        name: 'computer',
+        description: 'Control mouse and keyboard to interact with the desktop. Use this to click, type, paste, press keys, and take screenshots.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['click', 'double_click', 'right_click', 'type', 'paste', 'key', 'screenshot', 'scroll', 'application', 'terminal_command'],
+              description: 'The action to perform: click (left click), double_click, right_click, type (type text slowly), paste (paste text fast via clipboard), key (press key/combo), screenshot, scroll, application (open app), terminal_command (run command in terminal)',
+            },
+            x: {
+              type: 'integer',
+              description: 'X coordinate for mouse actions (click, double_click, right_click, scroll)',
+            },
+            y: {
+              type: 'integer',
+              description: 'Y coordinate for mouse actions (click, double_click, right_click, scroll)',
+            },
+            text: {
+              type: 'string',
+              description: 'Text to type/paste (for type or paste action) or key to press (for key action, e.g., "Return", "ctrl+c"). Use paste for long text (faster), type for short text.',
+            },
+            direction: {
+              type: 'string',
+              enum: ['up', 'down'],
+              description: 'Scroll direction (for scroll action)',
+            },
+            amount: {
+              type: 'integer',
+              description: 'Scroll amount in lines (for scroll action)',
+            },
+            application: {
+              type: 'string',
+              description: 'Application name to open (for application action, e.g., "chromium", "terminal", "vscode")',
+            },
+            command: {
+              type: 'string',
+              description: 'Terminal command to run (for terminal_command action, e.g., "ls -la", "npm install")',
+            },
+          },
+          required: ['action'],
+        },
+      },
+      {
+        name: 'set_task_status',
+        description: 'Mark the current step as completed or failed. Use this when the success criteria is met or when the step cannot be completed.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              enum: ['completed', 'failed'],
+              description: 'The status: completed (success criteria met) or failed (cannot complete)',
+            },
+            message: {
+              type: 'string',
+              description: 'Brief message explaining the status (what was accomplished or why it failed)',
+            },
+          },
+          required: ['status', 'message'],
         },
       },
     ];

@@ -1,11 +1,43 @@
-# -----------------------------------------------------------------------------
-# ARIA Desktop - Optimized VNC Environment
-# -----------------------------------------------------------------------------
+# =============================================================================
+# STAGE 1: builder — compile ariad + libnut-core
+# =============================================================================
+FROM ubuntu:22.04 AS builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Install only what's needed to build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates git \
+    cmake build-essential \
+    libx11-dev libxtst-dev libxinerama-dev libxi-dev \
+    libxt-dev libxrandr-dev libxkbcommon-dev libxkbcommon-x11-dev \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# --- ariad deps (cached unless package.json changes) ---
+COPY ./shared/ /aria/shared/
+COPY ./ariad/package.json ./ariad/package-lock.json* /aria/ariad/
+WORKDIR /aria/ariad
+RUN npm install
+
+# --- ariad source + build ---
+COPY ./ariad/ /aria/ariad/
+RUN npm run build && npm prune --production && npm cache clean --force
+
+# --- libnut-core native addon ---
+RUN git clone --depth 1 --filter=blob:none https://github.com/ZachJW34/libnut-core.git /compile/libnut-core \
+    && cd /compile/libnut-core \
+    && npm ci \
+    && npm run build:release \
+    && cp build/Release/libnut.node /aria/ariad/node_modules/@nut-tree-fork/libnut-linux/build/Release/libnut.node \
+    && rm -rf /compile
+
+# =============================================================================
+# STAGE 2: runtime — lean desktop environment
+# =============================================================================
 FROM ubuntu:22.04
 
-# -----------------------------------------------------------------------------
-# Environment & Build Args
-# -----------------------------------------------------------------------------
 ARG DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:0 \
     HOME=/home/user \
@@ -13,174 +45,119 @@ ENV DISPLAY=:0 \
     LANG=en_US.UTF-8 \
     LC_ALL=C
 
-# -----------------------------------------------------------------------------
-# System Base (Single Layer)
-# -----------------------------------------------------------------------------
+# All system packages in one layer — build deps excluded
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Core X11/VNC stack
+    # X11/VNC stack
     xvfb x11vnc xauth x11-xserver-utils \
-    # Minimal XFCE (no bloat)
-    xfce4-session xfce4-panel xfwm4 xfdesktop4 \
-    thunar mousepad xfce4-terminal \
-    # Icon themes (for proper icon display)
-    adwaita-icon-theme-full gnome-icon-theme hicolor-icon-theme \
+    # Minimal XFCE
+    xfce4-session xfce4-panel xfwm4 xfdesktop4 xfce4-terminal \
+    thunar mousepad \
+    # Icons & fonts
+    adwaita-icon-theme-full hicolor-icon-theme \
     gtk-update-icon-cache librsvg2-common \
-    # System essentials
+    fontconfig fonts-dejavu-core \
+    # System
     dbus dbus-x11 wmctrl sudo ca-certificates \
-    # Development tools
-    python3 python3-pip curl wget git \
     # Process management
-    supervisor netcat-openbsd \
-    # Minimal utilities (calculator, image viewer, archive manager)
-    galculator ristretto file-roller \
-    # Build dependencies (needed later)
-    cmake build-essential \
-    libx11-dev libxtst-dev libxinerama-dev libxi-dev \
-    libxt-dev libxrandr-dev libxkbcommon-dev libxkbcommon-x11-dev \
-    xclip \
-    # Explicitly remove bloat
+    supervisor socat \
+    # Python (for websockify)
+    python3 python3-pip \
+    # Runtime libs for native addons
+    libx11-6 libxtst6 libxinerama1 libxi6 libxt6 libxrandr2 \
+    libxkbcommon0 libxkbcommon-x11-0 \
+    # GL/GPU stubs
+    libgl1-mesa-dri libgl1-mesa-glx libcap2-bin \
+    # VSCode deps
+    libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
+    libcairo2 libcups2 libdrm2 libgbm1 libglib2.0-0 libgtk-3-0 \
+    libnspr4 libnss3 libpango-1.0-0 libx11-xcb1 libxcb-dri3-0 \
+    libxcomposite1 libxdamage1 libxfixes3 libxkbfile1 \
+    xclip curl \
     && apt-get remove -y --purge \
         light-locker xfce4-screensaver xfce4-power-manager \
         xfce4-notifyd xfce4-pulseaudio-plugin \
-        parole xfburn gigolo \
+        parole xfburn gigolo galculator ristretto file-roller \
         || true \
-    # Aggressive cleanup
     && apt-get autoremove -y --purge \
     && apt-get clean \
-    && rm -rf \
-        /var/lib/apt/lists/* \
-        /usr/share/doc/* \
-        /usr/share/man/* \
-        /usr/share/locale/* \
-        /tmp/* \
-        /var/tmp/* \
-    # Setup dbus
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /usr/share/locale/* \
     && mkdir -p /run/dbus /var/run/dbus \
     && dbus-uuidgen > /etc/machine-id
 
-# -----------------------------------------------------------------------------
-# Firefox & Node.js (Single Layer)
-# -----------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common apt-transport-https gnupg \
-    libgl1-mesa-dri libgl1-mesa-glx libcap2-bin \
-    fontconfig fonts-dejavu-core \
-    && add-apt-repository -y ppa:mozillateam/ppa \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+# Node.js (runtime only, no build tools)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# VSCode
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+        | gpg --dearmor -o /usr/share/keyrings/microsoft-archive-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] https://packages.microsoft.com/repos/code stable main" \
+        > /etc/apt/sources.list.d/vscode.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends firefox-esr nodejs \
-    # Set Firefox as default browser
-    && update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/firefox-esr 200 \
-    && update-alternatives --set x-www-browser /usr/bin/firefox-esr \
+    && apt-get install -y --no-install-recommends code \
+    && sed -i 's|Exec=/usr/bin/code|Exec=/usr/bin/code --no-sandbox --disable-gpu|g' /usr/share/applications/code.desktop \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/*
+
+# Chromium
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends software-properties-common \
+    && add-apt-repository ppa:xtradeb/apps -y \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends chromium \
+    && rm -f /usr/bin/chromium-browser \
+    && ln -sf /usr/bin/chromium /usr/bin/chromium-browser \
+    && sed -i 's|Exec=chromium %U|Exec=chromium --no-sandbox --disable-gpu --disable-dev-shm-usage %U|g' \
+        /usr/share/applications/chromium.desktop \
+    && cp /usr/share/applications/chromium.desktop /usr/share/applications/chromium-browser.desktop \
+    && update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/chromium-browser 200 \
+    && update-alternatives --set x-www-browser /usr/bin/chromium-browser \
     && fc-cache -f -v \
-    # Cleanup
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /tmp/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/*
 
-# Upgrade pip
-RUN pip3 install --no-cache-dir --upgrade pip
+# websockify + pinchtab
+RUN pip3 install --no-cache-dir websockify \
+    && npm install -g pinchtab \
+    && npm cache clean --force
 
-# -----------------------------------------------------------------------------
-# VNC & noVNC (Optimized)
-# -----------------------------------------------------------------------------
-RUN git clone --depth 1 https://github.com/novnc/noVNC.git /opt/noVNC \
-    && git clone --depth 1 https://github.com/novnc/websockify.git /opt/websockify \
-    && cd /opt/websockify \
-    && pip3 install --no-cache-dir --break-system-packages . \
-    && rm -rf /opt/noVNC/.git /opt/websockify/.git
+# Copy built ariad from builder stage
+COPY --from=builder /aria /aria
 
-# -----------------------------------------------------------------------------
-# ARIA Application Build
-# -----------------------------------------------------------------------------
-# Copy source files (context is packages/, so we need ariad/ prefix)
-COPY ./shared/ /aria/shared/
-COPY ./ariad/ /aria/ariad/
+# System config files
+COPY ./ariad/root/. /
 
-# Build ariad
-WORKDIR /aria/ariad
-RUN npm install \
-    && npm rebuild uiohook-napi \
-    && npm run build \
-    && npm prune --production \
-    && npm cache clean --force \
-    && rm -rf /root/.npm /tmp/*
-
-# Build libnut-core (optimized)
-WORKDIR /compile
-RUN git clone --depth 1 https://github.com/ZachJW34/libnut-core.git \
-    && cd libnut-core \
-    && npm ci \
-    && npm run build:release \
-    && cp build/Release/libnut.node /aria/ariad/node_modules/@nut-tree-fork/libnut-linux/build/Release/libnut.node \
-    # Cleanup build artifacts
-    && cd / \
-    && rm -rf /compile /tmp/* /var/tmp/* \
-    && apt-get remove -y --purge cmake build-essential git \
-    && apt-get autoremove -y --purge \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /aria/ariad
-
-# -----------------------------------------------------------------------------
-# User Setup & System Configuration
-# -----------------------------------------------------------------------------
-# Create user with sudo access
-RUN useradd -m -s /bin/bash user \
-    && echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
-    && mkdir -p /tmp/aria-screenshots \
-    && chown -R user:user /tmp/aria-screenshots
-
-# Copy system configuration files
-RUN chown -R root:root /aria/ariad/root \
-    && find /aria/ariad/root -type f -exec chmod 644 {} + \
-    && find /aria/ariad/root -type d -exec chmod 755 {} + \
-    && find /aria/ariad/root -type f -executable -exec chmod +x {} + \
-    && cp -a /aria/ariad/root/. /
-
-# Copy custom ARIA wallpaper (from build context packages/)
+# Wallpaper
 COPY ariad/ARIA-BG.png /usr/share/backgrounds/aria-bg.png
 
-# Setup user home directory with wallpaper autostart
-RUN mkdir -p /home/user/Desktop && \
-    mkdir -p /home/user/.config/autostart && \
-    mkdir -p /home/user/.local/share && \
-    mkdir -p /home/user/.cache && \
-    # Copy all application shortcuts to desktop
-    cp -f /usr/share/applications/firefox.desktop /home/user/Desktop/ 2>/dev/null || true && \
-    cp -f /usr/share/applications/firefox-esr.desktop /home/user/Desktop/ 2>/dev/null || true && \
-    cp -f /usr/share/applications/xfce4-terminal.desktop /home/user/Desktop/ 2>/dev/null || true && \
-    cp -f /usr/share/applications/mousepad.desktop /home/user/Desktop/ 2>/dev/null || true && \
-    cp -f /usr/share/applications/Thunar.desktop /home/user/Desktop/ 2>/dev/null || true && \
-    cp -f /usr/share/applications/thunar.desktop /home/user/Desktop/ 2>/dev/null || true && \
-    cp -f /usr/share/applications/galculator.desktop /home/user/Desktop/ 2>/dev/null || true && \
-    cp -f /usr/share/applications/ristretto.desktop /home/user/Desktop/ 2>/dev/null || true && \
-    cp -f /usr/share/applications/org.gnome.FileRoller.desktop /home/user/Desktop/ 2>/dev/null || true && \
-    cp -f /usr/share/applications/file-roller.desktop /home/user/Desktop/ 2>/dev/null || true && \
-    # Mark all desktop files as trusted/executable
-    chmod +x /home/user/Desktop/*.desktop 2>/dev/null || true && \
-    # Fix icon theme cache
-    gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true && \
-    echo '#!/bin/bash' > /home/user/.config/set-wallpaper.sh && \
-    echo 'sleep 3' >> /home/user/.config/set-wallpaper.sh && \
-    echo 'DISPLAY=:0 xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitorscreen/workspace0/last-image -s /usr/share/backgrounds/aria-bg.png' >> /home/user/.config/set-wallpaper.sh && \
-    echo 'DISPLAY=:0 xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitorscreen/workspace0/image-style -s 5' >> /home/user/.config/set-wallpaper.sh && \
-    chmod +x /home/user/.config/set-wallpaper.sh && \
-    echo '[Desktop Entry]' > /home/user/.config/autostart/set-wallpaper.desktop && \
-    echo 'Type=Application' >> /home/user/.config/autostart/set-wallpaper.desktop && \
-    echo 'Name=Set Wallpaper' >> /home/user/.config/autostart/set-wallpaper.desktop && \
-    echo 'Exec=/home/user/.config/set-wallpaper.sh' >> /home/user/.config/autostart/set-wallpaper.desktop && \
-    echo 'Hidden=false' >> /home/user/.config/autostart/set-wallpaper.desktop && \
-    echo 'NoDisplay=false' >> /home/user/.config/autostart/set-wallpaper.desktop && \
-    echo 'X-GNOME-Autostart-enabled=true' >> /home/user/.config/autostart/set-wallpaper.desktop && \
-    chown -R user:user /home/user && \
-    chmod -R 755 /home/user
+# User setup + desktop shortcuts in one layer
+RUN useradd -m -s /bin/bash user \
+    && echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
+    && mkdir -p /tmp/aria-screenshots /home/user/Desktop \
+        /home/user/.config/autostart /home/user/.local/share \
+        /home/user/.cache /home/user/.pinchtab /data/pinchtab \
+    && chown -R user:user /tmp/aria-screenshots /home/user /data/pinchtab \
+    # Desktop shortcuts
+    && for f in chromium-browser code xfce4-terminal thunar mousepad; do \
+        cp -f /usr/share/applications/$f.desktop /home/user/Desktop/ 2>/dev/null || true; \
+       done \
+    && sed -i 's|Exec=/usr/bin/code --password-store=basic|Exec=/usr/bin/code --no-sandbox --disable-gpu --password-store=basic|' /home/user/Desktop/code.desktop 2>/dev/null || true \
+    && chmod +x /home/user/Desktop/*.desktop 2>/dev/null || true \
+    && gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true \
+    # Gmail shortcut
+    && printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=Gmail\nIcon=chromium-browser\nExec=chromium-browser --no-sandbox --app=https://mail.google.com\nCategories=Network;Email;\nStartupNotify=true\n' \
+        > /home/user/Desktop/gmail.desktop \
+    && chmod +x /home/user/Desktop/gmail.desktop \
+    # Wallpaper script
+    && printf '#!/bin/bash\nsleep 3\nDISPLAY=:0 xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitorscreen/workspace0/last-image -s /usr/share/backgrounds/aria-bg.png\nDISPLAY=:0 xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitorscreen/workspace0/image-style -s 5\n' \
+        > /home/user/.config/set-wallpaper.sh \
+    && chmod +x /home/user/.config/set-wallpaper.sh \
+    && printf '[Desktop Entry]\nType=Application\nName=Set Wallpaper\nExec=/home/user/.config/set-wallpaper.sh\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n' \
+        > /home/user/.config/autostart/set-wallpaper.desktop \
+    && chown -R user:user /home/user \
+    && chmod -R 755 /home/user
 
 WORKDIR /home/user
 
-# -----------------------------------------------------------------------------
-# Runtime Configuration
-# -----------------------------------------------------------------------------
-EXPOSE 9990
+EXPOSE 9990 9867
 
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf", "-n"]

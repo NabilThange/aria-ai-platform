@@ -293,13 +293,13 @@ export const _applicationTool = {
       application: {
         type: 'string' as const,
         enum: [
-          'firefox',
-          '1password',
-          'thunderbird',
+          'chromium',
+          'gmail',
           'vscode',
           'terminal',
+          'thunar',
+          'mousepad',
           'desktop',
-          'directory',
         ],
         description: 'The application to open or focus',
       },

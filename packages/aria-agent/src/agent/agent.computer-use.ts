@@ -22,23 +22,54 @@ import {
   isReadFileToolUseBlock,
 } from '@bytebot/shared';
 import { Logger } from '@nestjs/common';
+import { PinchTabService } from '../services/pinchtab.service';
+import { handlePinchTabToolUse } from './agent.pinchtab-tools';
 
 const ARIA_DESKTOP_BASE_URL = process.env.ARIA_DESKTOP_BASE_URL as string;
 
 export async function handleComputerToolUse(
   block: ComputerToolUseContentBlock,
   logger: Logger,
+  pinchTabService?: PinchTabService,
 ): Promise<ToolResultContentBlock> {
-  logger.debug(
-    `Handling computer tool use: ${block.name}, tool_use_id: ${block.id}`,
+  logger.log(
+    `🔧 TOOL EXECUTION: ${block.name} | ID: ${block.id}`,
   );
+  
+  // Log input safely - avoid logging large base64 image data
+  const inputPreview = { ...block.input };
+  if (inputPreview.image && typeof inputPreview.image === 'string' && inputPreview.image.length > 100) {
+    inputPreview.image = `[base64 image data: ${(inputPreview.image.length / 1024).toFixed(1)}KB]`;
+  }
+  if (inputPreview.data && typeof inputPreview.data === 'string' && inputPreview.data.length > 100) {
+    inputPreview.data = `[base64 data: ${(inputPreview.data.length / 1024).toFixed(1)}KB]`;
+  }
+  logger.log(`📥 Tool Input: ${JSON.stringify(inputPreview)}`);
+
+  // Check if this is a PinchTab tool
+  if (
+    pinchTabService &&
+    block.name.startsWith('pinchtab_')
+  ) {
+    logger.log(`🌐 Routing to PinchTab service: ${block.name}`);
+    const result = await handlePinchTabToolUse(
+      block.name,
+      block.input,
+      pinchTabService,
+      logger,
+    );
+    if (result) {
+      result.tool_use_id = block.id;
+      logger.log(`✅ PinchTab tool completed: ${block.name}`);
+      return result;
+    }
+  }
 
   if (isScreenshotToolUseBlock(block)) {
-    logger.debug('Processing screenshot request');
+    logger.log('📸 Taking screenshot...');
     try {
-      logger.debug('Taking screenshot');
       const image = await screenshot();
-      logger.debug('Screenshot captured successfully');
+      logger.log('✅ Screenshot captured successfully');
 
       return {
         type: MessageContentType.ToolResult,
@@ -55,7 +86,7 @@ export async function handleComputerToolUse(
         ],
       };
     } catch (error) {
-      logger.error(`Screenshot failed: ${error.message}`, error.stack);
+      logger.error(`❌ Screenshot failed: ${error.message}`, error.stack);
       return {
         type: MessageContentType.ToolResult,
         tool_use_id: block.id,
@@ -515,7 +546,7 @@ async function cursorPosition(): Promise<Coordinates> {
       }),
     });
 
-    const data = await response.json();
+    const data = await response.json() as { x: number; y: number };
     return { x: data.x, y: data.y };
   } catch (error) {
     console.error('Error in cursor_position action:', error);
@@ -541,7 +572,7 @@ async function screenshot(): Promise<string> {
       throw new Error(`Failed to take screenshot: ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { image?: string };
 
     if (!data.image) {
       throw new Error('Failed to take screenshot: No image data received');
@@ -598,7 +629,7 @@ async function readFile(input: { path: string }): Promise<{
       throw new Error(`Failed to read file: ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { success: boolean; data?: string; name?: string; size?: number; mediaType?: string; message?: string };
     return data;
   } catch (error) {
     console.error('Error in read_file action:', error);
@@ -634,7 +665,7 @@ export async function writeFile(input: {
       throw new Error(`Failed to write file: ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { success: boolean; message?: string };
     return data;
   } catch (error) {
     console.error('Error in write_file action:', error);

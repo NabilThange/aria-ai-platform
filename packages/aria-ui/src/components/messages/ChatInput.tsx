@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { ArrowRight02Icon, Attachment01Icon, Cancel01Icon, BrainIcon } from "@hugeicons/core-free-icons";
+import { ArrowRight02Icon, Attachment01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 
 interface FileWithBase64 {
@@ -19,8 +19,6 @@ interface ChatInputProps {
   onFileUpload?: (files: FileWithBase64[]) => void;
   minLines?: number;
   placeholder?: string;
-  planningEnabled?: boolean;
-  onPlanningToggle?: (enabled: boolean) => void;
 }
 
 export function ChatInput({
@@ -31,8 +29,6 @@ export function ChatInput({
   onFileUpload,
   minLines = 1,
   placeholder = "Give Aria a task to work on...",
-  planningEnabled = false,
-  onPlanningToggle,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -163,27 +159,6 @@ export function ChatInput({
         className="hidden"
         accept="*/*"
       />
-      
-      {/* Planning Toggle */}
-      {onPlanningToggle && (
-        <div className="mb-2 flex items-center gap-1.5">
-          <label className="flex cursor-pointer items-center gap-1.5">
-            <input
-              type="checkbox"
-              checked={planningEnabled}
-              onChange={(e) => onPlanningToggle(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-bytebot-bronze-light-7 text-bytebot-bronze-dark-7 focus:ring-bytebot-bronze-dark-7"
-            />
-            <HugeiconsIcon
-              icon={BrainIcon}
-              className="h-3.5 w-3.5 text-bytebot-bronze-dark-7"
-            />
-            <span className="text-xs text-bytebot-bronze-dark-7">
-              Extended Thinking
-            </span>
-          </label>
-        </div>
-      )}
       
       {errorMessage && (
         <div className="mb-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">

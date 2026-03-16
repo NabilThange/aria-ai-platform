@@ -1,0 +1,67 @@
+---
+title: 'image-classification'
+description: Categorize images into predefined classes for tasks like object recognition, medical imaging, and security systems
+icon: 'image'
+mode: 'wide'
+---
+
+<AccordionGroup>
+	<Accordion defaultOpen="true" title="Basic usage">
+		Send an image to a model to generate classification labels
+		<CodeGroup>
+			```javascript javascript
+			import Bytez from 'bytez.js';
+			
+			// insert your key
+			const sdk = new Bytez('BYTEZ_KEY');
+			
+			// choose your model
+			const model = sdk.model('google/vit-base-patch16-224');
+			
+			// provide the model with input
+			const input = {
+			  "url": "https://www.padoniavets.com/sites/default/files/field/image/cats-and-dogs.jpg"
+			};
+			
+			// send to the model
+			const { error, output } = await model.run(input);
+			
+			// observe the output
+			console.log({ error, output });
+			
+			```
+			```python python
+			from bytez import Bytez
+			
+			# insert your key
+			sdk = Bytez("BYTEZ_KEY")
+			
+			# choose your model
+			model = sdk.model("google/vit-base-patch16-224")
+			
+			# provide the model with input
+			input = {
+			  "url": "https://www.padoniavets.com/sites/default/files/field/image/cats-and-dogs.jpg"
+			}
+			
+			# send to the model
+			result = model.run(input)
+			
+			# observe the output
+			print({"error": result.error, "output": result.output})
+			
+			```
+			```bash http
+			curl -X POST 'https://api.bytez.com/models/v2/google/vit-base-patch16-224' \
+			-H 'Authorization: BYTEZ_KEY' \
+			-H 'Content-Type: application/json' \
+			--data '{
+			  "url": "https://www.padoniavets.com/sites/default/files/field/image/cats-and-dogs.jpg"
+			}'
+			```
+			You can send the **image** via `url` or `base64` data URL.
+			
+			We recommend `url` for better performance, as `base64` increases payload size.
+		</CodeGroup>
+	</Accordion>
+</AccordionGroup>

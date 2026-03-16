@@ -5,13 +5,16 @@ import { AgentProcessor } from './agent.processor';
 import { ConfigModule } from '@nestjs/config';
 import { AgentScheduler } from './agent.scheduler';
 import { InputCaptureService } from './input-capture.service';
-import { GoogleModule } from '../google/google.module';
 import { GroqModule } from '../groq/groq.module';
-import { OpenRouterModule } from '../openrouter/openrouter.module';
 import { BytezModule } from '../bytez/bytez.module';
+import { GoogleModule } from '../google/google.module';
 import { SummariesModule } from 'src/summaries/summaries.modue';
 import { AgentAnalyticsService } from './agent.analytics';
-import { PlannerModule } from '../planner/planner.module';
+import { PinchTabService } from '../services/pinchtab.service';
+import { OrchestrationModule } from '../orchestration/orchestration.module';
+import { SharedStateModule } from '../shared-state/shared-state.module';
+import { AgentsService } from '../agents/agents.service';
+import { AgentsController } from '../agents/agents.controller';
 
 @Module({
   imports: [
@@ -19,18 +22,21 @@ import { PlannerModule } from '../planner/planner.module';
     TasksModule,
     MessagesModule,
     SummariesModule,
-    GoogleModule,
     GroqModule,
-    OpenRouterModule,
     BytezModule,
-    forwardRef(() => PlannerModule),
+    GoogleModule,
+    OrchestrationModule,
+    SharedStateModule,
   ],
   providers: [
     AgentProcessor,
     AgentScheduler,
     InputCaptureService,
     AgentAnalyticsService,
+    PinchTabService,
+    AgentsService,
   ],
-  exports: [AgentProcessor],
+  controllers: [AgentsController],
+  exports: [AgentProcessor, AgentsService],
 })
 export class AgentModule {}

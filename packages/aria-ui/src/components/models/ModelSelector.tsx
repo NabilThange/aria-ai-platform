@@ -32,18 +32,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         <SelectValue placeholder="Select a model" />
       </SelectTrigger>
       <SelectContent>
-        {groupedModels.google.length > 0 && (
-          <>
-            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-              GOOGLE
-            </div>
-            {groupedModels.google.map((m) => (
-              <SelectItem key={m.name} value={m.name}>
-                {m.title}
-              </SelectItem>
-            ))}
-          </>
-        )}
         {groupedModels.groq.length > 0 && (
           <>
             <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
@@ -68,12 +56,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             ))}
           </>
         )}
-        {groupedModels.openrouter.length > 0 && (
+        {groupedModels.google && groupedModels.google.length > 0 && (
           <>
             <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-              OPENROUTER
+              GOOGLE
             </div>
-            {groupedModels.openrouter.map((m) => (
+            {groupedModels.google.map((m) => (
               <SelectItem key={m.name} value={m.name}>
                 {m.title}
               </SelectItem>

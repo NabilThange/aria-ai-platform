@@ -29,10 +29,9 @@ export interface Model {
 }
 
 export interface GroupedModels {
-  google: Model[];
   groq: Model[];
-  openrouter: Model[];
   bytez: Model[];
+  google: Model[];
 }
 
 export interface ModelsResponse {
@@ -81,6 +80,15 @@ export interface File {
   taskId: string;
 }
 
+export interface AgentExecution {
+  agentName: string;
+  startTime: string;
+  endTime: string;
+  tokensUsed: number;
+  cost: number;
+  result: 'success' | 'failure';
+}
+
 export interface Task {
   id: string;
   description: string;
@@ -99,5 +107,8 @@ export interface Task {
   result?: unknown;
   model: Model;
   files?: File[];
-  planningEnabled?: boolean;
+  // Multi-agent execution metadata
+  agentExecutions?: AgentExecution[];
+  totalCost?: number;
+  activeAgent?: string;
 }

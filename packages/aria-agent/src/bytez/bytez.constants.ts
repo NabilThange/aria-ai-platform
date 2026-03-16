@@ -8,6 +8,18 @@ export const DEFAULT_MODEL = {
 export const BYTEZ_MODELS = [
   DEFAULT_MODEL,
   {
+    name: 'anthropic/claude-opus-4-6',
+    title: 'Claude Opus 4',
+    provider: 'bytez',
+    contextWindow: 200000,
+  },
+  {
+    name: 'anthropic/claude-sonnet-4-6',
+    title: 'Claude Sonnet 4.6',
+    provider: 'bytez',
+    contextWindow: 200000,
+  },
+  {
     name: 'anthropic/claude-sonnet-4-5',
     title: 'Claude Sonnet 4.5',
     provider: 'bytez',
@@ -26,3 +38,4 @@ export const BYTEZ_MODELS = [
     contextWindow: 128000,
   },
 ];
+

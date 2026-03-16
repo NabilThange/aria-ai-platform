@@ -10,12 +10,16 @@ import {
   Home01Icon,
   ComputerIcon,
   DashboardSquare01Icon,
+  Settings02Icon,
 } from "@hugeicons/core-free-icons";
 import { usePathname } from "next/navigation";
+import { AgentSettingsModal } from "@/components/settings/AgentSettingsModal";
+import { Button } from "@/components/ui/button";
 
 export function Header() {
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const pathname = usePathname();
 
   // After mounting, we can safely show the theme-dependent content
@@ -58,6 +62,7 @@ export function Header() {
               alt="Aria Logo"
               width={100}
               height={30}
+              priority
               className="h-8 w-auto"
             />
           ) : (
@@ -93,7 +98,18 @@ export function Header() {
           </Link>
         </div>
       </div>
-      <div className="flex items-center gap-3"></div>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setSettingsOpen(true)}
+          className="h-9 w-9 text-bytebot-bronze-dark-9 hover:text-bytebot-bronze-light-12 hover:bg-bytebot-bronze-light-a1"
+        >
+          <HugeiconsIcon icon={Settings02Icon} className="h-5 w-5" />
+        </Button>
+      </div>
+
+      <AgentSettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
     </header>
   );
 }

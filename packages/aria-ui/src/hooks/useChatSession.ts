@@ -11,6 +11,7 @@ import {
 } from "@/utils/taskUtils";
 import { MessageContentType } from "@bytebot/shared";
 import { useWebSocket } from "./useWebSocket";
+import { logger } from "@/lib/logger";
 
 interface UseChatSessionProps {
   initialTaskId?: string;
@@ -30,6 +31,7 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [toolCalls, setToolCalls] = useState<Map<string, any>>(new Map());
 
   const processedMessageIds = useRef<Set<string>>(new Set());
 
@@ -58,21 +60,19 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
       );
       setGroupedMessages(processedMessages);
     } catch (error) {
-      console.error("Error reloading grouped messages:", error);
+      logger.error({ event: 'messages.reload_failed', taskId: currentTaskId }, 'Error reloading grouped messages', error instanceof Error ? error : undefined);
     }
   }, [currentTaskId]);
 
   const handleNewMessage = useCallback(
     (message: Message) => {
-      // Only add message if it's not already processed and belongs to current task
       if (
         !processedMessageIds.current.has(message.id) &&
         message.taskId === currentTaskId
       ) {
-        console.log("Adding new message from WebSocket:", message);
+        logger.debug({ event: 'ws.message_added', taskId: currentTaskId, messageId: message.id }, 'Adding new message from WebSocket');
         processedMessageIds.current.add(message.id);
         setMessages((prev) => [...prev, message]);
-        // Reload grouped messages to reflect the new message
         reloadGroupedMessages();
       }
     },
@@ -80,13 +80,13 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
   );
 
   const handleTaskCreated = useCallback((task: Task) => {
-    console.log("New task created:", task);
+    logger.info({ event: 'task.created', taskId: task.id }, 'New task created');
   }, []);
 
   const handleTaskDeleted = useCallback(
     (taskId: string) => {
       if (taskId === currentTaskId) {
-        console.log("Current task was deleted");
+        logger.info({ event: 'task.deleted', taskId }, 'Current task was deleted');
         setCurrentTaskId(null);
         setMessages([]);
         processedMessageIds.current = new Set();
@@ -95,18 +95,67 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
     [currentTaskId],
   );
 
+  const handleBrowserLog = useCallback(
+    (log: any) => {
+      if (log.taskId !== currentTaskId) return;
+
+      logger.debug({ event: 'browser_log.received', type: log.type }, 'Browser log event');
+
+      if (log.type === 'tool.call') {
+        // Store tool call with pending state
+        const toolCallId = `${log.data.agentName}-${log.data.toolName}-${log.timestamp}`;
+        setToolCalls((prev) => {
+          const updated = new Map(prev);
+          updated.set(toolCallId, {
+            agentName: log.data.agentName,
+            toolName: log.data.toolName,
+            toolInput: log.data.toolInput,
+            timestamp: log.timestamp,
+            pending: true,
+          });
+          return updated;
+        });
+      } else if (log.type === 'tool.result') {
+        // Update tool call with result
+        const toolCallId = Array.from(toolCalls.keys()).find((key) =>
+          key.includes(log.data.toolName) && key.includes(log.data.agentName)
+        );
+        
+        if (toolCallId) {
+          setToolCalls((prev) => {
+            const updated = new Map(prev);
+            const existing = updated.get(toolCallId);
+            if (existing) {
+              updated.set(toolCallId, {
+                ...existing,
+                success: log.data.success,
+                output: log.data.output,
+                error: log.data.error,
+                duration: log.data.duration,
+                pending: false,
+              });
+            }
+            return updated;
+          });
+        }
+      }
+    },
+    [currentTaskId, toolCalls],
+  );
+
   // Initialize WebSocket connection
   const { joinTask, leaveTask } = useWebSocket({
     onTaskUpdate: handleTaskUpdate,
     onNewMessage: handleNewMessage,
     onTaskCreated: handleTaskCreated,
     onTaskDeleted: handleTaskDeleted,
+    onBrowserLog: handleBrowserLog,
   });
 
   // Load more messages function for infinite scroll
   const loadMoreMessages = useCallback(async () => {
     if (!currentTaskId || isLoadingMoreMessages || !hasMoreMessages) {
-      console.log("loadMoreMessages early return");
+      logger.debug({ event: 'messages.load_more.skipped', taskId: currentTaskId, isLoadingMoreMessages, hasMoreMessages }, 'loadMoreMessages early return');
       return;
     }
 
@@ -150,7 +199,7 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
         }
       }
     } catch (error) {
-      console.error("Error loading more messages:", error);
+      logger.error({ event: 'messages.load_more_failed', taskId: currentTaskId }, 'Error loading more messages', error instanceof Error ? error : undefined);
     } finally {
       setIsLoadingMoreMessages(false);
     }
@@ -162,8 +211,7 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
       setIsLoadingSession(true);
       try {
         if (initialTaskId) {
-          // If we have an initial task ID (from URL), fetch that specific task
-          console.log(`Fetching specific task: ${initialTaskId}`);
+          logger.debug({ event: 'session.loading', taskId: initialTaskId }, `Fetching specific task`);
           const task = await fetchTaskById(initialTaskId);
           // Load raw messages for compatibility and processed messages for chat UI
           const messages = await fetchTaskMessages(initialTaskId, {
@@ -179,7 +227,7 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
           );
 
           if (task) {
-            console.log(`Found task: ${task.id}`);
+            logger.info({ event: 'session.task_found', taskId: task.id, status: task.status }, `Task loaded`);
             setCurrentTaskId(task.id);
             setTaskStatus(task.status); // Set the task status when loading
             setControl(task.control);
@@ -216,11 +264,11 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
               setHasMoreMessages(false);
             }
           } else {
-            console.log(`Task with ID ${initialTaskId} not found`);
+            logger.warn({ event: 'session.task_not_found', taskId: initialTaskId }, `Task not found`);
           }
         }
       } catch (error) {
-        console.error("Error loading session:", error);
+        logger.error({ event: 'session.load_failed', taskId: initialTaskId }, 'Error loading session', error instanceof Error ? error : undefined);
       } finally {
         setIsLoadingSession(false);
       }
@@ -229,13 +277,12 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
     loadSession();
   }, [initialTaskId]);
 
-  // Join/leave WebSocket task rooms when task ID changes
   useEffect(() => {
     if (currentTaskId) {
-      console.log(`Joining WebSocket room for task: ${currentTaskId}`);
+      logger.debug({ event: 'ws.join_task', taskId: currentTaskId }, `Joining WebSocket room`);
       joinTask(currentTaskId);
     } else {
-      console.log("Leaving WebSocket task room");
+      logger.debug({ event: 'ws.leave_task' }, 'Leaving WebSocket task room');
       leaveTask();
     }
   }, [currentTaskId, joinTask, leaveTask]);
@@ -282,7 +329,7 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
         setControl(updatedTask.control);
       }
     } catch (error) {
-      console.error("Error taking over task:", error);
+      logger.error({ event: 'task.takeover_failed', taskId: currentTaskId }, 'Error taking over task', error instanceof Error ? error : undefined);
     }
   };
 
@@ -295,7 +342,7 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
         setControl(updatedTask.control);
       }
     } catch (error) {
-      console.error("Error resuming task:", error);
+      logger.error({ event: 'task.resume_failed', taskId: currentTaskId }, 'Error resuming task', error instanceof Error ? error : undefined);
     }
   };
 
@@ -309,7 +356,7 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
         setControl(updatedTask.control);
       }
     } catch (error) {
-      console.error("Error cancelling task:", error);
+      logger.error({ event: 'task.cancel_failed', taskId: currentTaskId }, 'Error cancelling task', error instanceof Error ? error : undefined);
     }
   };
 
@@ -325,6 +372,7 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
     isLoadingSession,
     isLoadingMoreMessages,
     hasMoreMessages,
+    toolCalls,
     loadMoreMessages,
     handleAddMessage,
     handleTakeOverTask,

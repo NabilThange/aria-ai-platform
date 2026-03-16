@@ -15,15 +15,30 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { Message, Task } from '@prisma/client';
 import { AddTaskMessageDto } from './dto/add-task-message.dto';
 import { MessagesService } from '../messages/messages.service';
-import { GOOGLE_MODELS } from '../google/google.constants';
 import { GROQ_MODELS } from '../groq/groq.constants';
-import { OPENROUTER_MODELS } from '../openrouter/openrouter.constants';
 import { BYTEZ_MODELS } from '../bytez/bytez.constants';
+import { GOOGLE_MODELS } from '../google/google.constants';
 import { BytebotAgentModel } from 'src/agent/agent.types';
 
-const googleApiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-const groqApiKey = process.env.GROQ_API_KEY;
-const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+// Check for any Google API key (single or numbered)
+const hasGoogleApiKey = (): boolean => {
+  if (process.env.GOOGLE_API_KEY) return true;
+  let keyIndex = 1;
+  while (process.env[`GOOGLE_API_KEY_${keyIndex}`]) {
+    return true;
+  }
+  return false;
+};
+
+// Check for any Groq API key (single or numbered)
+const hasGroqApiKey = (): boolean => {
+  if (process.env.GROQ_API_KEY) return true;
+  let keyIndex = 1;
+  while (process.env[`GROQ_API_KEY_${keyIndex}`]) {
+    return true;
+  }
+  return false;
+};
 
 // Check for any Bytez API key (single or numbered)
 const hasBytezApiKey = (): boolean => {
@@ -34,13 +49,15 @@ const hasBytezApiKey = (): boolean => {
   }
   return false;
 };
+
+const googleApiKey = hasGoogleApiKey();
+const groqApiKey = hasGroqApiKey();
 const bytezApiKey = hasBytezApiKey();
 
 const models = [
-  ...(googleApiKey ? GOOGLE_MODELS : []),
   ...(groqApiKey ? GROQ_MODELS : []),
-  ...(openRouterApiKey ? OPENROUTER_MODELS : []),
   ...(bytezApiKey ? BYTEZ_MODELS : []),
+  ...(googleApiKey ? GOOGLE_MODELS : []),
 ];
 
 @Controller('tasks')
@@ -81,10 +98,9 @@ export class TasksController {
   async getModels() {
     // Group models by provider for sectioned display in UI
     const groupedModels = {
-      google: googleApiKey ? GOOGLE_MODELS : [],
       groq: groqApiKey ? GROQ_MODELS : [],
-      openrouter: openRouterApiKey ? OPENROUTER_MODELS : [],
       bytez: bytezApiKey ? BYTEZ_MODELS : [],
+      google: googleApiKey ? GOOGLE_MODELS : [],
     };
 
     // Also return flat list for backward compatibility
@@ -173,5 +189,30 @@ export class TasksController {
   @HttpCode(HttpStatus.OK)
   async cancel(@Param('id') taskId: string): Promise<Task> {
     return this.tasksService.cancel(taskId);
+  }
+
+  @Get(':id/shared-state')
+  async getSharedState(@Param('id') taskId: string): Promise<Record<string, any>> {
+    return this.tasksService.getSharedState(taskId);
+  }
+
+  @Get(':id/clarification')
+  async getClarificationQuestions(@Param('id') taskId: string) {
+    return this.tasksService.getClarificationSession(taskId);
+  }
+
+  @Post(':id/clarification/answer')
+  @HttpCode(HttpStatus.OK)
+  async submitClarificationAnswer(
+    @Param('id') taskId: string,
+    @Body() body: { questionId: string; answer: string },
+  ) {
+    return this.tasksService.submitClarificationAnswer(taskId, body.questionId, body.answer);
+  }
+
+  @Post(':id/clarification/skip')
+  @HttpCode(HttpStatus.OK)
+  async skipClarification(@Param('id') taskId: string) {
+    return this.tasksService.skipClarification(taskId);
   }
 }

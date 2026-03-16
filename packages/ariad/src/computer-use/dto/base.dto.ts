@@ -27,11 +27,11 @@ export enum ScrollDirection {
 }
 
 export enum ApplicationName {
-  FIREFOX = 'firefox',
-  ONEPASSWORD = '1password',
-  THUNDERBIRD = 'thunderbird',
+  CHROMIUM = 'chromium',
+  GMAIL = 'gmail',
   VSCODE = 'vscode',
   TERMINAL = 'terminal',
+  THUNAR = 'thunar',
+  MOUSEPAD = 'mousepad',
   DESKTOP = 'desktop',
-  DIRECTORY = 'directory',
 }

@@ -1,0 +1,67 @@
+---
+title: 'video-classification'
+description: Categorize videos into predefined classes for applications in video content analysis, security surveillance, and media organization
+icon: 'video'
+mode: 'wide'
+---
+
+<AccordionGroup>
+	<Accordion defaultOpen="true" title="Basic usage">
+		Send a video input URL to classify its contents
+		<CodeGroup>
+			```javascript javascript
+			import Bytez from 'bytez.js';
+			
+			// insert your key
+			const sdk = new Bytez('BYTEZ_KEY');
+			
+			// choose your model
+			const model = sdk.model('ahmedabdo/video-classifier');
+			
+			// provide the model with input
+			const input = {
+			  "url": "https://video-previews.elements.envatousercontent.com/6d07b79d-b17a-47b5-9d24-4fe984c7ca36/watermarked_preview/watermarked_preview.mp4"
+			};
+			
+			// send to the model
+			const { error, output } = await model.run(input);
+			
+			// observe the output
+			console.log({ error, output });
+			
+			```
+			```python python
+			from bytez import Bytez
+			
+			# insert your key
+			sdk = Bytez("BYTEZ_KEY")
+			
+			# choose your model
+			model = sdk.model("ahmedabdo/video-classifier")
+			
+			# provide the model with input
+			input = {
+			  "url": "https://video-previews.elements.envatousercontent.com/6d07b79d-b17a-47b5-9d24-4fe984c7ca36/watermarked_preview/watermarked_preview.mp4"
+			}
+			
+			# send to the model
+			result = model.run(input)
+			
+			# observe the output
+			print({"error": result.error, "output": result.output})
+			
+			```
+			```bash http
+			curl -X POST 'https://api.bytez.com/models/v2/ahmedabdo/video-classifier' \
+			-H 'Authorization: BYTEZ_KEY' \
+			-H 'Content-Type: application/json' \
+			--data '{
+			  "url": "https://video-previews.elements.envatousercontent.com/6d07b79d-b17a-47b5-9d24-4fe984c7ca36/watermarked_preview/watermarked_preview.mp4"
+			}'
+			```
+			You can send the **video** via `url` or `base64` data URL.
+			
+			We recommend `url` for better performance, as `base64` increases payload size.
+		</CodeGroup>
+	</Accordion>
+</AccordionGroup>

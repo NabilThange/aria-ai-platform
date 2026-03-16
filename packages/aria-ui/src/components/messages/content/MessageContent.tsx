@@ -5,11 +5,25 @@ import {
   isImageContentBlock,
   isComputerToolUseContentBlock,
   isToolResultContentBlock,
+  isAgentThinkingContentBlock,
+  isAgentPlanContentBlock,
+  isAgentVerifyContentBlock,
+  isAgentQuestionContentBlock,
+  isAgentRecoveryContentBlock,
+  isAgentReportContentBlock,
 } from "@bytebot/shared";
 import { TextContent } from "./TextContent";
 import { ImageContent } from "./ImageContent";
 import { ComputerToolContent } from "./ComputerToolContent";
 import { ErrorContent } from "./ErrorContent";
+import {
+  AgentThinkingContent,
+  AgentPlanContent,
+  AgentVerifyContent,
+  AgentQuestionContent,
+  AgentRecoveryContent,
+  AgentReportContent,
+} from "./AgentActionContent";
 
 interface MessageContentProps {
   content: MessageContentBlock[];
@@ -76,6 +90,49 @@ export function MessageContent({
             block.content?.[0].type === "text" && (
               <TextContent block={block.content?.[0]} />
             )}
+
+          {/* Multi-agent action blocks */}
+          {isAgentThinkingContentBlock(block) && (
+            <AgentThinkingContent
+              agent={block.agent}
+              thinking={block.thinking}
+            />
+          )}
+
+          {isAgentPlanContentBlock(block) && (
+            <AgentPlanContent
+              agent={block.agent}
+              plan={block.plan}
+            />
+          )}
+
+          {isAgentVerifyContentBlock(block) && (
+            <AgentVerifyContent
+              agent={block.agent}
+              verification={block.verification}
+            />
+          )}
+
+          {isAgentQuestionContentBlock(block) && (
+            <AgentQuestionContent
+              agent={block.agent}
+              question={block.question}
+            />
+          )}
+
+          {isAgentRecoveryContentBlock(block) && (
+            <AgentRecoveryContent
+              agent={block.agent}
+              strategy={block.strategy}
+            />
+          )}
+
+          {isAgentReportContentBlock(block) && (
+            <AgentReportContent
+              agent={block.agent}
+              report={block.report}
+            />
+          )}
         </div>
       ))}
     </div>

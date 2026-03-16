@@ -8,7 +8,6 @@ import {
   TaskPriority,
   TaskStatus,
   TaskType,
-  PlanStatus,
 } from '@prisma/client';
 import {
   isComputerToolUseContentBlock,
@@ -25,22 +24,21 @@ import {
 } from '@bytebot/shared';
 import { InputCaptureService } from './input-capture.service';
 import { OnEvent } from '@nestjs/event-emitter';
-import { GoogleService } from '../google/google.service';
 import { GroqService } from '../groq/groq.service';
-import { OpenRouterService } from '../openrouter/openrouter.service';
 import { BytezService } from '../bytez/bytez.service';
+import { GoogleService } from '../google/google.service';
+import { SharedStateService } from '../shared-state/shared-state.service';
 import {
   BytebotAgentModel,
   BytebotAgentService,
   BytebotAgentResponse,
 } from './agent.types';
-import {
-  getAgentSystemPrompt,
-  SUMMARIZATION_SYSTEM_PROMPT,
-} from './agent.constants';
+import { SUMMARIZATION_SYSTEM_PROMPT, getAgentSystemPrompt } from '../config/system-prompts.config';
 import { SummariesService } from '../summaries/summaries.service';
 import { handleComputerToolUse } from './agent.computer-use';
-import { PlannerService } from '../planner/planner.service';
+import { PinchTabService } from '../services/pinchtab.service';
+import { ConfigService } from '@nestjs/config';
+import { OrchestrationService } from '../orchestration/orchestration.service';
 
 @Injectable()
 export class AgentProcessor {
@@ -54,21 +52,21 @@ export class AgentProcessor {
     private readonly tasksService: TasksService,
     private readonly messagesService: MessagesService,
     private readonly summariesService: SummariesService,
-    private readonly googleService: GoogleService,
     private readonly groqService: GroqService,
-    private readonly openRouterService: OpenRouterService,
     private readonly bytezService: BytezService,
+    private readonly googleService: GoogleService,
     private readonly inputCaptureService: InputCaptureService,
-    @Inject(forwardRef(() => PlannerService))
-    private readonly plannerService: PlannerService,
+    private readonly pinchTabService: PinchTabService,
+    private readonly configService: ConfigService,
+    private readonly orchestrationService: OrchestrationService,
+    private readonly sharedStateService: SharedStateService,
   ) {
     this.services = {
-      google: this.googleService,
       groq: this.groqService,
-      openrouter: this.openRouterService,
       bytez: this.bytezService,
+      google: this.googleService,
     };
-    this.logger.log('AgentProcessor initialized');
+    this.logger.log('AgentProcessor initialized (Multi-Agent System)');
   }
 
   /**
@@ -99,11 +97,75 @@ export class AgentProcessor {
   }
 
   @OnEvent('task.resume')
-  handleTaskResume({ taskId }: { taskId: string }) {
-    if (this.currentTaskId === taskId && this.isProcessing) {
-      this.logger.log(`Task resume event received for task ID: ${taskId}`);
+  async handleTaskResume({ taskId }: { taskId: string }) {
+    this.logger.log(`Task resume event received for task ID: ${taskId}`);
+    
+    // Check if this task was paused for clarification
+    const status = await this.sharedStateService.get<string>(taskId, 'status');
+    
+    if (status === 'needs_clarification') {
+      // Task was paused for clarification, restart orchestration
+      this.logger.log(`Restarting orchestration for task ${taskId} with user's clarification response`);
+      
+      const task = await this.tasksService.findById(taskId);
+      if (!task) {
+        this.logger.error(`Task ${taskId} not found`);
+        return;
+      }
+      
+      // Get the latest user message (the clarification response)
+      const messages = await this.messagesService.findAll(taskId, { limit: 10, page: 1 });
+      const latestUserMessage = messages.reverse().find(m => m.role === 'USER');
+      
+      let inputWithClarification = task.description;
+      if (latestUserMessage && latestUserMessage.content) {
+        // Extract text from message content (content is a JSON array)
+        const contentArray = Array.isArray(latestUserMessage.content) 
+          ? latestUserMessage.content 
+          : [];
+        
+        const textContent = contentArray
+          .filter((block: any) => block && typeof block === 'object' && block.type === 'text')
+          .map((block: any) => block.text)
+          .join('\n');
+        
+        if (textContent) {
+          inputWithClarification = `${task.description}\n\nUser clarification: ${textContent}`;
+          this.logger.log(`Appending user clarification: "${textContent}"`);
+        }
+      }
+      
+      // Clear the clarification status
+      await this.sharedStateService.set(taskId, 'status', 'running');
+      
+      // Restart orchestration with clarified input
+      try {
+        await this.orchestrationService.run(inputWithClarification, taskId, task.model);
+        
+        // Check final status
+        const finalStatus = await this.sharedStateService.get<string>(taskId, 'status');
+        
+        if (finalStatus === 'needs_clarification') {
+          this.logger.log(`Task ${taskId} needs more clarification`);
+          await this.tasksService.update(taskId, {
+            status: TaskStatus.NEEDS_HELP,
+          });
+        } else {
+          // Mark task as completed
+          await this.tasksService.update(taskId, {
+            status: TaskStatus.COMPLETED,
+          });
+          this.logger.log(`Task ${taskId} completed after resume`);
+        }
+      } catch (error) {
+        this.logger.error(`Task ${taskId} failed after resume: ${error.message}`);
+        await this.tasksService.update(taskId, {
+          status: TaskStatus.FAILED,
+        });
+      }
+    } else if (this.currentTaskId === taskId && this.isProcessing) {
+      // Normal resume during active processing
       this.abortController = new AbortController();
-
       void this.runIteration(taskId);
     }
   }
@@ -115,20 +177,61 @@ export class AgentProcessor {
     await this.stopProcessing();
   }
 
-  @OnEvent('plan.approved')
-  async handlePlanApproved({ planId, taskId }: { planId: string; taskId: string }) {
-    this.logger.log(`\n========================================`);
-    this.logger.log(`PLAN APPROVED EVENT RECEIVED`);
-    this.logger.log(`Plan ID: ${planId}`);
-    this.logger.log(`Task ID: ${taskId}`);
-    this.logger.log(`========================================\n`);
-
-    // Start processing the task now that the plan is approved
-    if (!this.isProcessing) {
-      this.logger.log(`Agent is not currently processing, starting task execution`);
-      this.processTask(taskId);
-    } else {
-      this.logger.warn(`Agent is already processing task ${this.currentTaskId}, cannot start ${taskId}`);
+  @OnEvent('clarification.completed')
+  async handleClarificationCompleted({ taskId }: { taskId: string }) {
+    this.logger.log(`Clarification completed event received for task ID: ${taskId}`);
+    
+    // Get the clarification answer from shared state
+    const session = await this.sharedStateService.get<any>(taskId, 'clarification_session');
+    if (!session || !session.answers || session.answers.length === 0) {
+      this.logger.warn(`No clarification answers found for task ${taskId}`);
+      return;
+    }
+    
+    // Get the user's answer
+    const answer = session.answers[0].answer;
+    this.logger.log(`User clarification answer: ${answer}`);
+    
+    // Resume task processing with the clarified input
+    // Append the answer to the original task description
+    const task = await this.tasksService.findById(taskId);
+    if (!task) {
+      this.logger.error(`Task ${taskId} not found`);
+      return;
+    }
+    
+    const clarifiedInput = `${task.description}\n\nUser clarification: ${answer}`;
+    this.logger.log(`Resuming task ${taskId} with clarified input`);
+    
+    // Update task status to RUNNING
+    await this.tasksService.update(taskId, {
+      status: TaskStatus.RUNNING,
+    });
+    
+    // Restart orchestration with clarified input
+    try {
+      await this.orchestrationService.run(clarifiedInput, taskId, task.model);
+      
+      // Check if task needs more clarification
+      const taskStatus = await this.sharedStateService.get<string>(taskId, 'status');
+      
+      if (taskStatus === 'needs_clarification') {
+        this.logger.log(`Task ${taskId} needs more clarification`);
+        await this.tasksService.update(taskId, {
+          status: TaskStatus.NEEDS_HELP,
+        });
+      } else {
+        // Mark task as completed
+        await this.tasksService.update(taskId, {
+          status: TaskStatus.COMPLETED,
+        });
+        this.logger.log(`Task ${taskId} completed after clarification`);
+      }
+    } catch (error) {
+      this.logger.error(`Task ${taskId} failed after clarification: ${error.message}`);
+      await this.tasksService.update(taskId, {
+        status: TaskStatus.FAILED,
+      });
     }
   }
 
@@ -142,75 +245,6 @@ export class AgentProcessor {
 
     // Check if task has planning enabled
     const task = await this.tasksService.findById(taskId);
-    
-    if (task.planningEnabled) {
-      this.logger.log(`Task ${taskId} has planning enabled, checking for plan`);
-      
-      // Check if plan exists
-      const existingPlan = await this.plannerService.getPlanByTaskId(taskId);
-      
-      if (!existingPlan) {
-        // Create plan and keep task in PENDING status
-        this.logger.log(`Creating plan for task ${taskId}`);
-        try {
-          await this.plannerService.createPlan({
-            taskId,
-            taskDescription: task.description,
-            model: task.model as any,
-          });
-          
-          // Update task status back to PENDING to wait for plan approval
-          await this.tasksService.update(taskId, {
-            status: TaskStatus.PENDING,
-          });
-          
-          this.logger.log(`Plan created for task ${taskId}, waiting for approval`);
-          return; // Wait for plan approval before processing
-        } catch (error) {
-          this.logger.error(`Failed to create plan for task ${taskId}:`, error);
-          await this.tasksService.update(taskId, {
-            status: TaskStatus.FAILED,
-          });
-          return;
-        }
-      } else if (existingPlan.status === PlanStatus.PENDING) {
-        this.logger.log(`Plan exists for task ${taskId} but is pending approval`);
-        
-        // Update task status back to PENDING if it's not already
-        if (task.status !== TaskStatus.PENDING) {
-          await this.tasksService.update(taskId, {
-            status: TaskStatus.PENDING,
-          });
-        }
-        
-        return; // Wait for approval
-      } else if (existingPlan.status === PlanStatus.APPROVED || existingPlan.status === PlanStatus.EXECUTING) {
-        // Plan is approved, proceed with normal agent execution
-        // The agent will use the plan as context to guide its actions
-        this.logger.log(`Plan approved for task ${taskId}, proceeding with agent execution`);
-        // Continue to normal agent execution below
-      } else if (existingPlan.status === PlanStatus.PLANNING) {
-        this.logger.warn(`Plan for task ${taskId} is still being generated, waiting`);
-        return;
-      } else if (existingPlan.status === PlanStatus.FAILED) {
-        // Plan failed, mark task as failed
-        this.logger.log(`Plan failed for task ${taskId}, marking task as failed`);
-        await this.tasksService.update(taskId, {
-          status: TaskStatus.FAILED,
-        });
-        return;
-      } else if (existingPlan.status === PlanStatus.CANCELLED) {
-        // Plan cancelled, mark task as cancelled
-        this.logger.log(`Plan cancelled for task ${taskId}, marking task as cancelled`);
-        await this.tasksService.update(taskId, {
-          status: TaskStatus.CANCELLED,
-        });
-        return;
-      } else {
-        this.logger.warn(`Plan for task ${taskId} has unexpected status ${existingPlan.status}`);
-        return;
-      }
-    }
 
     // Ensure task is in RUNNING status before proceeding
     if (task.status !== TaskStatus.RUNNING) {
@@ -219,12 +253,38 @@ export class AgentProcessor {
       });
     }
 
-    this.isProcessing = true;
-    this.currentTaskId = taskId;
-    this.abortController = new AbortController();
-
-    // Kick off the first iteration without blocking the caller
-    void this.runIteration(taskId);
+    // Delegate to multi-agent orchestration system
+    this.logger.log(`Delegating task ${taskId} to multi-agent orchestration system`);
+    
+    try {
+      // Delegate to OrchestrationService
+      await this.orchestrationService.run(task.description, taskId, task.model);
+      
+      // Check if task needs clarification (orchestration service returns early in this case)
+      const taskStatus = await this.sharedStateService.get<string>(taskId, 'status');
+      
+      if (taskStatus === 'needs_clarification') {
+        // Task is paused for clarification - don't mark as completed
+        this.logger.log(`Task ${taskId} paused for user clarification`);
+        await this.tasksService.update(taskId, {
+          status: TaskStatus.NEEDS_HELP, // Use NEEDS_HELP status for clarification
+        });
+      } else {
+        // Mark task as completed
+        await this.tasksService.update(taskId, {
+          status: TaskStatus.COMPLETED,
+        });
+        
+        this.logger.log(`Multi-agent orchestration completed for task ${taskId}`);
+      }
+    } catch (error) {
+      this.logger.error(`Multi-agent orchestration failed for task ${taskId}:`, error);
+      
+      // Mark task as failed
+      await this.tasksService.update(taskId, {
+        status: TaskStatus.FAILED,
+      });
+    }
   }
 
   /**
@@ -298,47 +358,8 @@ export class AgentProcessor {
         return;
       }
 
-      // Check if task has an approved plan and inject it into the system prompt
-      let systemPrompt = getAgentSystemPrompt(); // Get fresh prompt with current date/time
-      if (task.planningEnabled) {
-        const plan = await this.plannerService.getPlanByTaskId(taskId);
-        if (plan && plan.status === PlanStatus.APPROVED && plan.selectedPathId) {
-          // Fetch full plan with paths and steps
-          const fullPlan = await this.plannerService.getPlanById(plan.id);
-          const selectedPath = (fullPlan as any).paths?.find((p: any) => p.id === plan.selectedPathId);
-          if (selectedPath) {
-            this.logger.log(`Injecting approved plan into system prompt for task ${taskId}`);
-            
-            // Build plan context
-            const planContext = `
-
-## APPROVED EXECUTION PLAN
-
-You have an approved execution plan for this task. Follow these steps:
-
-**Strategy:** ${selectedPath.strategy}
-**Estimated Duration:** ${selectedPath.estimatedDuration} seconds
-**Estimated Tokens:** ${selectedPath.estimatedTokens}
-
-**Steps to execute:**
-${selectedPath.steps.map((step: any, idx: number) => `
-${idx + 1}. ${step.action}
-   Description: ${step.description}
-   Type: ${step.type}
-   ${step.command ? `Command: ${step.command}` : ''}
-   ${step.verification ? `Verification: ${step.verification}` : ''}
-`).join('\n')}
-
-**IMPORTANT:** Execute these steps using your computer control tools. Take screenshots to verify each step. Mark the task as completed when all steps are done successfully.
-`;
-            
-            systemPrompt = getAgentSystemPrompt() + planContext;
-          }
-        }
-      }
-
       agentResponse = await service.generateMessage(
-        systemPrompt,
+        getAgentSystemPrompt(),
         messages,
         model.name,
         true,
@@ -447,7 +468,7 @@ ${idx + 1}. ${step.action}
 
       for (const block of messageContentBlocks) {
         if (isComputerToolUseContentBlock(block)) {
-          const result = await handleComputerToolUse(block, this.logger);
+          const result = await handleComputerToolUse(block, this.logger, this.pinchTabService);
           generatedToolResults.push(result);
         }
 

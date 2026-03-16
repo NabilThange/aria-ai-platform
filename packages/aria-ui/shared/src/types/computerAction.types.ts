@@ -2,13 +2,13 @@ export type Coordinates = { x: number; y: number };
 export type Button = "left" | "right" | "middle";
 export type Press = "up" | "down";
 export type Application =
-  | "firefox"
-  | "1password"
-  | "thunderbird"
+  | "chromium"
+  | "gmail"
   | "vscode"
   | "terminal"
-  | "desktop"
-  | "directory";
+  | "thunar"
+  | "mousepad"
+  | "desktop";
 
 // Define individual computer action types
 export type MoveMouseAction = {

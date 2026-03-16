@@ -98,15 +98,6 @@ const Activities = () => {
             </div>
             <div className="w-full mr-14">
               <div className="flex justify-between w-full mb-4">
-                <h1 className="text-[#b1a696] text-xl">Planner Agent</h1>
-                <p className="text-[#b1a696] text-[0.7rem]">Builds step-by-step plan</p>
-              </div>
-              <div className="relative z-9 w-full h-[0.1rem] bg-[#4f4b48]">
-                <div className="progress-line absolute z-10 bg-[#f4efe7] w-[80%] h-[0.1rem] top-1/2 -translate-y-1/2 left-0"></div>
-              </div>
-            </div>
-            <div className="w-full mr-14">
-              <div className="flex justify-between w-full mb-4">
                 <h1 className="text-[#b1a696] text-xl">Executor + Verifier</h1>
                 <p className="text-[#b1a696] text-[0.7rem]">Act & verify each step</p>
               </div>

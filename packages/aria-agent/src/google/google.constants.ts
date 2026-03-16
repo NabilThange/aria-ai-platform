@@ -1,36 +1,28 @@
-import { BytebotAgentModel } from '../agent/agent.types';
+export const DEFAULT_MODEL = {
+  name: 'gemini-2.5-flash-preview-05-20',
+  title: 'Gemini 2.5 Flash Preview',
+  provider: 'google',
+  contextWindow: 1048576,
+};
 
-export const GOOGLE_MODELS: BytebotAgentModel[] = [
+export const GOOGLE_MODELS = [
+  DEFAULT_MODEL,
   {
+    name: 'gemini-2.0-flash-lite',
+    title: 'Gemini 2.0 Flash Lite',
     provider: 'google',
-    name: 'gemini-2.5-flash-lite',
-    title: 'Gemini 2.5 Flash-Lite (Free Tier - Best)',
-    contextWindow: 1000000,
+    contextWindow: 1048576,
   },
   {
-    provider: 'google',
     name: 'gemini-2.5-flash',
     title: 'Gemini 2.5 Flash',
-    contextWindow: 1000000,
+    provider: 'google',
+    contextWindow: 1048576,
   },
   {
+    name: 'gemini-2.5-flash-lite',
+    title: 'Gemini 2.5 Flash Lite',
     provider: 'google',
-    name: 'gemini-2.5-pro',
-    title: 'Gemini 2.5 Pro',
-    contextWindow: 1000000,
-  },
-  {
-    provider: 'google',
-    name: 'gemini-1.5-flash',
-    title: 'Gemini 1.5 Flash (Legacy)',
-    contextWindow: 1000000,
-  },
-  {
-    provider: 'google',
-    name: 'gemini-1.5-pro',
-    title: 'Gemini 1.5 Pro (Legacy)',
-    contextWindow: 2000000,
+    contextWindow: 1048576,
   },
 ];
-
-export const DEFAULT_MODEL = GOOGLE_MODELS[0];

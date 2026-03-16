@@ -513,3 +513,104 @@ export function isReadFileToolUseBlock(
   const block = obj as Record<string, any>;
   return block.name === "computer_read_file";
 }
+
+// Multi-agent action type guards
+export function isAgentThinkingContentBlock(
+  obj: unknown
+): obj is import("../types/messageContent.types").AgentThinkingContentBlock {
+  if (!obj || typeof obj !== "object") {
+    return false;
+  }
+
+  const block = obj as any;
+  return (
+    block.type === MessageContentType.AgentThinking &&
+    typeof block.agent === "string" &&
+    typeof block.thinking === "string" &&
+    typeof block.timestamp === "string"
+  );
+}
+
+export function isAgentPlanContentBlock(
+  obj: unknown
+): obj is import("../types/messageContent.types").AgentPlanContentBlock {
+  if (!obj || typeof obj !== "object") {
+    return false;
+  }
+
+  const block = obj as any;
+  return (
+    block.type === MessageContentType.AgentPlan &&
+    block.agent === "ORCHESTRATOR" &&
+    block.plan !== undefined &&
+    Array.isArray(block.plan.steps) &&
+    typeof block.timestamp === "string"
+  );
+}
+
+export function isAgentVerifyContentBlock(
+  obj: unknown
+): obj is import("../types/messageContent.types").AgentVerifyContentBlock {
+  if (!obj || typeof obj !== "object") {
+    return false;
+  }
+
+  const block = obj as any;
+  return (
+    block.type === MessageContentType.AgentVerify &&
+    block.agent === "VERIFIER" &&
+    block.verification !== undefined &&
+    typeof block.verification.action_succeeded === "boolean" &&
+    typeof block.timestamp === "string"
+  );
+}
+
+export function isAgentQuestionContentBlock(
+  obj: unknown
+): obj is import("../types/messageContent.types").AgentQuestionContentBlock {
+  if (!obj || typeof obj !== "object") {
+    return false;
+  }
+
+  const block = obj as any;
+  return (
+    block.type === MessageContentType.AgentQuestion &&
+    block.agent === "CLARIFIER" &&
+    typeof block.question === "string" &&
+    typeof block.timestamp === "string"
+  );
+}
+
+export function isAgentRecoveryContentBlock(
+  obj: unknown
+): obj is import("../types/messageContent.types").AgentRecoveryContentBlock {
+  if (!obj || typeof obj !== "object") {
+    return false;
+  }
+
+  const block = obj as any;
+  return (
+    block.type === MessageContentType.AgentRecovery &&
+    block.agent === "RECOVERY" &&
+    block.strategy !== undefined &&
+    typeof block.strategy.strategy === "string" &&
+    typeof block.timestamp === "string"
+  );
+}
+
+export function isAgentReportContentBlock(
+  obj: unknown
+): obj is import("../types/messageContent.types").AgentReportContentBlock {
+  if (!obj || typeof obj !== "object") {
+    return false;
+  }
+
+  const block = obj as any;
+  return (
+    block.type === MessageContentType.AgentReport &&
+    block.agent === "REPORTER" &&
+    block.report !== undefined &&
+    typeof block.report.summary === "string" &&
+    typeof block.timestamp === "string"
+  );
+}

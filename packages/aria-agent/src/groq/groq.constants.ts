@@ -14,6 +14,12 @@ export const GROQ_MODELS = [
     contextWindow: 128000,
   },
   {
+    name: 'openai/gpt-oss-20b',
+    title: 'GPT OSS 20B',
+    provider: 'groq',
+    contextWindow: 128000,
+  },
+  {
     name: 'meta-llama/llama-4-scout-17b-16e-instruct',
     title: 'Llama 4 Scout 17B',
     provider: 'groq',

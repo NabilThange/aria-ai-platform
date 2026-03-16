@@ -1,4 +1,5 @@
 {
     "javascript.autoClosingTags": false,
-    "typescript.autoClosingTags": false
+    "typescript.autoClosingTags": false,
+    "terminal.integrated.scrollback": 10000
 }

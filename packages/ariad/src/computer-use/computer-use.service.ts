@@ -285,21 +285,21 @@ export class ComputerUseService {
     }
 
     const commandMap: Record<string, string> = {
-      firefox: 'firefox-esr',
-      '1password': '1password',
-      thunderbird: 'thunderbird',
+      chromium: 'chromium-browser',
+      gmail: 'chromium-browser',
       vscode: 'code',
       terminal: 'xfce4-terminal',
-      directory: 'thunar',
+      thunar: 'thunar',
+      mousepad: 'mousepad',
     };
 
     const processMap: Record<Application, string> = {
-      firefox: 'Navigator.firefox-esr',
-      '1password': '1password.1Password',
-      thunderbird: 'Mail.thunderbird',
+      chromium: 'chromium-browser.Chromium-browser',
+      gmail: 'chromium-browser.Chromium-browser',
       vscode: 'code.Code',
       terminal: 'xfce4-terminal.Xfce4-Terminal',
-      directory: 'Thunar',
+      thunar: 'Thunar.Thunar',
+      mousepad: 'mousepad.Mousepad',
       desktop: 'xfdesktop.Xfdesktop',
     };
 

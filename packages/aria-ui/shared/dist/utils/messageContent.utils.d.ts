@@ -28,3 +28,9 @@ export declare function isSetTaskStatusToolUseBlock(obj: unknown): obj is SetTas
 export declare function isCreateTaskToolUseBlock(obj: unknown): obj is CreateTaskToolUseBlock;
 export declare function isWriteFileToolUseBlock(obj: unknown): obj is WriteFileToolUseBlock;
 export declare function isReadFileToolUseBlock(obj: unknown): obj is ReadFileToolUseBlock;
+export declare function isAgentThinkingContentBlock(obj: unknown): obj is import("../types/messageContent.types").AgentThinkingContentBlock;
+export declare function isAgentPlanContentBlock(obj: unknown): obj is import("../types/messageContent.types").AgentPlanContentBlock;
+export declare function isAgentVerifyContentBlock(obj: unknown): obj is import("../types/messageContent.types").AgentVerifyContentBlock;
+export declare function isAgentQuestionContentBlock(obj: unknown): obj is import("../types/messageContent.types").AgentQuestionContentBlock;
+export declare function isAgentRecoveryContentBlock(obj: unknown): obj is import("../types/messageContent.types").AgentRecoveryContentBlock;
+export declare function isAgentReportContentBlock(obj: unknown): obj is import("../types/messageContent.types").AgentReportContentBlock;

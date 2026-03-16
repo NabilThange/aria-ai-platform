@@ -1,14 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  isComputerToolUseContentBlock,
-  isImageContentBlock,
-  isUserActionContentBlock,
   MessageContentBlock,
   MessageContentType,
   TextContentBlock,
-  ThinkingContentBlock,
   ToolUseContentBlock,
+  isComputerToolUseContentBlock,
+  isImageContentBlock,
+  isUserActionContentBlock,
 } from '@bytebot/shared';
 import {
   BytebotAgentService,
@@ -17,32 +16,73 @@ import {
 } from '../agent/agent.types';
 import { Message, Role } from '@prisma/client';
 import { googleTools } from './google.tools';
-import {
-  Content,
-  GenerateContentResponse,
-  GoogleGenAI,
-  Part,
-} from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { v4 as uuid } from 'uuid';
 import { DEFAULT_MODEL } from './google.constants';
+import { GoogleKeyManagerService } from './google-key-manager.service';
 
 @Injectable()
 export class GoogleService implements BytebotAgentService {
-  private readonly google: GoogleGenAI;
+  private client: GoogleGenerativeAI;
   private readonly logger = new Logger(GoogleService.name);
 
-  constructor(private readonly configService: ConfigService) {
-    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly keyManager: GoogleKeyManagerService,
+  ) {
+    const totalKeys = this.keyManager.getTotalKeys();
 
-    if (!apiKey) {
+    if (totalKeys === 0) {
       this.logger.warn(
-        'GEMINI_API_KEY is not set. GoogleService will not work properly.',
+        'No GOOGLE_API_KEY found. GoogleService will not work properly.',
       );
+    } else {
+      this.logger.log(`GoogleService initialized with ${totalKeys} API key(s)`);
     }
 
-    this.google = new GoogleGenAI({
-      apiKey: apiKey || 'dummy-key-for-initialization',
+    // Initialize with first available key
+    const apiKey = this.keyManager.getCurrentKey();
+    this.client = new GoogleGenerativeAI(apiKey || 'dummy-key-for-initialization');
+  }
+
+  private updateGoogleClient(): void {
+    const apiKey = this.keyManager.getCurrentKey();
+    if (apiKey) {
+      this.client = new GoogleGenerativeAI(apiKey);
+    }
+  }
+
+  /**
+   * Convert OpenAI-format tools to Google's functionDeclarations format
+   * OpenAI: [{ type: "function", function: { name, description, parameters } }]
+   * Google: [{ functionDeclarations: [{ name, description, parameters }] }]
+   */
+  private convertToolsToGoogleFormat(tools: any[]): any[] {
+    // If tools are already in Google format (have functionDeclarations), return as-is
+    if (tools.length > 0 && tools[0].functionDeclarations) {
+      return tools;
+    }
+
+    // Convert from OpenAI format to Google format
+    const functionDeclarations = tools.map((tool) => {
+      // Handle OpenAI format: { type: "function", function: {...} }
+      if (tool.type === 'function' && tool.function) {
+        return {
+          name: tool.function.name,
+          description: tool.function.description,
+          parameters: tool.function.parameters || { type: 'object', properties: {} },
+        };
+      }
+      
+      // Handle direct format: { name, description, parameters }
+      return {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters || { type: 'object', properties: {} },
+      };
     });
+
+    return [{ functionDeclarations }];
   }
 
   async generateMessage(
@@ -51,247 +91,238 @@ export class GoogleService implements BytebotAgentService {
     model: string = DEFAULT_MODEL.name,
     useTools: boolean = true,
     signal?: AbortSignal,
+    customTools?: any[],
   ): Promise<BytebotAgentResponse> {
-    try {
-      const maxTokens = 8192;
+    const maxRetries = this.keyManager.getTotalKeys();
+    let lastError: any;
 
-      // Convert our message content blocks to Anthropic's expected format
-      const googleMessages = this.formatMessagesForGoogle(messages);
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Update client with current key before each attempt
+        this.updateGoogleClient();
 
-      const response: GenerateContentResponse =
-        await this.google.models.generateContent({
+        const googleMessages = this.formatMessagesForGoogle(messages);
+        
+        // Convert tools to Google format if customTools provided, otherwise use default googleTools
+        const tools = customTools 
+          ? this.convertToolsToGoogleFormat(customTools)
+          : googleTools;
+
+        this.logger.debug(`📤 Sending ${googleMessages.length} messages to Google (model: ${model})`);
+        this.logger.debug(`   Using ${tools.length} tool groups`);
+
+        const generationConfig: any = {
+          temperature: 0.7,
+          maxOutputTokens: 8192,
+        };
+
+        const modelInstance = this.client.getGenerativeModel({
           model,
-          contents: googleMessages,
-          config: {
-            thinkingConfig: {
-              thinkingBudget: 24576,
-            },
-            maxOutputTokens: maxTokens,
-            systemInstruction: systemPrompt,
-            tools: useTools
-              ? [
-                  {
-                    functionDeclarations: googleTools,
-                  },
-                ]
-              : [],
-            abortSignal: signal,
-          },
+          systemInstruction: systemPrompt,
+          ...(useTools ? { tools } : {}),
         });
 
-      const candidate = response.candidates?.[0];
+        const response = await modelInstance.generateContent({
+          contents: googleMessages,
+          generationConfig,
+        });
 
-      if (!candidate) {
-        throw new Error('No candidate found in response');
+        const result = response.response;
+
+        if (!result) {
+          throw new Error('No response from Google Gemini API');
+        }
+
+        this.logger.log(`📝 [GoogleService] Response received`);
+        this.logger.log(`   Finish reason: ${result.candidates?.[0]?.finishReason}`);
+
+        // Mark key as successful
+        this.keyManager.markCurrentKeyAsSuccessful();
+
+        return {
+          contentBlocks: this.formatGoogleResponse(result),
+          tokenUsage: {
+            inputTokens: result.usageMetadata?.promptTokenCount || 0,
+            outputTokens: result.usageMetadata?.candidatesTokenCount || 0,
+            totalTokens: result.usageMetadata?.totalTokenCount || 0,
+          },
+        };
+      } catch (error: any) {
+        lastError = error;
+
+        if (error.name === 'AbortError') {
+          throw new BytebotAgentInterrupt();
+        }
+
+        // Always rotate on any API failure (matches Bytez behavior)
+        this.keyManager.markCurrentKeyAsFailed(error);
+
+        if (attempt === maxRetries - 1) {
+          // All keys exhausted
+          this.logger.error(
+            `All Google API keys exhausted. Last error: ${error.message}`,
+            error.stack,
+          );
+          throw error;
+        }
+
+        this.logger.warn(
+          `Google attempt ${attempt + 1}/${maxRetries} failed, trying next key: ${error.message}`,
+        );
       }
-
-      const content = candidate.content;
-
-      if (!content) {
-        throw new Error('No content found in candidate');
-      }
-
-      if (!content.parts) {
-        throw new Error('No parts found in content');
-      }
-
-      return {
-        contentBlocks: this.formatGoogleResponse(content.parts),
-        tokenUsage: {
-          inputTokens: response.usageMetadata?.promptTokenCount || 0,
-          outputTokens: response.usageMetadata?.candidatesTokenCount || 0,
-          totalTokens: response.usageMetadata?.totalTokenCount || 0,
-        },
-      };
-    } catch (error) {
-      if (error.message.includes('AbortError')) {
-        throw new BytebotAgentInterrupt();
-      }
-      this.logger.error(
-        `Error sending message to Google Gemini: ${error.message}`,
-        error.stack,
-      );
-      throw error;
     }
+
+    // If we exhausted all retries
+    throw lastError || new Error('All Google API keys failed');
   }
 
-  /**
-   * Convert our MessageContentBlock format to Google Gemini's message format
-   */
-  private formatMessagesForGoogle(messages: Message[]): Content[] {
-    const googleMessages: Content[] = [];
+  private formatMessagesForGoogle(messages: Message[]): any[] {
+    const googleMessages: any[] = [];
 
-    // Process each message content block
     for (const message of messages) {
       const messageContentBlocks = message.content as MessageContentBlock[];
 
-      const parts: Part[] = [];
-
+      // Handle user action blocks
       if (
         messageContentBlocks.every((block) => isUserActionContentBlock(block))
       ) {
         const userActionContentBlocks = messageContentBlocks.flatMap(
           (block) => block.content,
         );
+        const textParts: string[] = [];
+
         for (const block of userActionContentBlocks) {
           if (isComputerToolUseContentBlock(block)) {
-            parts.push({
-              text: `User performed action: ${block.name}\n${JSON.stringify(block.input, null, 2)}`,
+            textParts.push(
+              `User performed action: ${block.name}\n${JSON.stringify(block.input, null, 2)}`,
+            );
+          }
+        }
+
+        if (textParts.length > 0) {
+          googleMessages.push({
+            role: 'user',
+            parts: [{ text: textParts.join('\n\n') }],
+          });
+        }
+        continue;
+      }
+
+      // Handle regular message blocks
+      const parts: any[] = [];
+      const toolCalls: any[] = [];
+
+      for (const block of messageContentBlocks) {
+        switch (block.type) {
+          case MessageContentType.Text:
+            parts.push({ text: block.text });
+            break;
+          case MessageContentType.ToolUse:
+            toolCalls.push({
+              id: block.id,
+              name: block.name,
+              args: block.input,
             });
-          } else if (isImageContentBlock(block)) {
+            break;
+          case MessageContentType.ToolResult: {
+            const content = block.content[0];
+            const resultText =
+              content.type === MessageContentType.Text
+                ? content.text
+                : JSON.stringify(content);
+
             parts.push({
-              inlineData: {
-                data: block.source.data,
-                mimeType: block.source.media_type,
+              text: block.is_error
+                ? `Error: ${resultText}`
+                : resultText,
+            });
+            break;
+          }
+          case MessageContentType.Image:
+            if (isImageContentBlock(block)) {
+              const imageData = block.source?.data || '';
+              const mediaType = block.source?.media_type || 'image/png';
+
+              parts.push({
+                inlineData: {
+                  mimeType: mediaType,
+                  data: imageData,
+                },
+              });
+            }
+            break;
+          case MessageContentType.Thinking:
+            parts.push({ text: `[Thinking: ${block.thinking}]` });
+            break;
+        }
+      }
+
+      if (message.role === Role.ASSISTANT) {
+        const msgParts: any[] = [];
+
+        if (parts.length > 0) {
+          msgParts.push(...parts);
+        }
+
+        if (toolCalls.length > 0) {
+          for (const toolCall of toolCalls) {
+            msgParts.push({
+              functionCall: {
+                name: toolCall.name,
+                args: toolCall.args,
               },
             });
           }
         }
-      } else {
-        for (const block of messageContentBlocks) {
-          switch (block.type) {
-            case MessageContentType.Text:
-              parts.push({
-                text: block.text,
-              });
-              break;
-            case MessageContentType.ToolUse:
-              parts.push({
-                functionCall: {
-                  id: block.id,
-                  name: block.name,
-                  args: block.input,
-                },
-              });
-              break;
-            case MessageContentType.Image:
-              parts.push({
-                inlineData: {
-                  data: block.source.data,
-                  mimeType: block.source.media_type,
-                },
-              });
-              break;
-            case MessageContentType.ToolResult: {
-              const toolResultContentBlock = block.content[0];
-              if (toolResultContentBlock.type === MessageContentType.Image) {
-                parts.push({
-                  functionResponse: {
-                    id: block.tool_use_id,
-                    name: 'screenshot',
-                    response: {
-                      ...(!block.is_error && {
-                        output: 'screenshot successful',
-                      }),
-                      ...(block.is_error && { error: block.content[0] }),
-                    },
-                  },
-                });
-                parts.push({
-                  inlineData: {
-                    data: toolResultContentBlock.source.data,
-                    mimeType: toolResultContentBlock.source.media_type,
-                  },
-                });
-                break;
-              }
 
-              parts.push({
-                functionResponse: {
-                  id: block.tool_use_id,
-                  name: this.getToolName(block.tool_use_id, messages),
-                  response: {
-                    ...(!block.is_error && { output: block.content[0] }),
-                    ...(block.is_error && { error: block.content[0] }),
-                  },
-                },
-              });
-              break;
-            }
-            case MessageContentType.Thinking:
-              parts.push({
-                text: block.thinking,
-                thoughtSignature: block.signature,
-                thought: true,
-              });
-              break;
-            default:
-              parts.push({
-                text: JSON.stringify(block),
-              });
-              break;
-          }
+        if (msgParts.length > 0) {
+          googleMessages.push({
+            role: 'model',
+            parts: msgParts,
+          });
         }
+      } else if (parts.length > 0) {
+        googleMessages.push({
+          role: 'user',
+          parts,
+        });
       }
-
-      googleMessages.push({
-        role: message.role === Role.USER ? 'user' : 'model',
-        parts: parts,
-      });
     }
 
     return googleMessages;
   }
 
-  // Find the content block with the tool_use_id and return the name
-  private getToolName(
-    tool_use_id: string,
-    messages: Message[],
-  ): string | undefined {
-    const toolMessage = messages.find((message) =>
-      (message.content as MessageContentBlock[]).some(
-        (block) =>
-          block.type === MessageContentType.ToolUse && block.id === tool_use_id,
-      ),
-    );
-    if (!toolMessage) {
-      return undefined;
+  private formatGoogleResponse(response: any): MessageContentBlock[] {
+    const blocks: MessageContentBlock[] = [];
+
+    if (!response.candidates || response.candidates.length === 0) {
+      return blocks;
     }
 
-    const toolBlock = (toolMessage.content as MessageContentBlock[]).find(
-      (block) =>
-        block.type === MessageContentType.ToolUse && block.id === tool_use_id,
-    );
-    if (!toolBlock) {
-      return undefined;
-    }
-    return (toolBlock as ToolUseContentBlock).name;
-  }
+    const candidate = response.candidates[0];
 
-  /**
-   * Convert Google Gemini's response content to our MessageContentBlock format
-   */
-  private formatGoogleResponse(parts: Part[]): MessageContentBlock[] {
-    return parts.map((part) => {
+    if (!candidate.content || !candidate.content.parts) {
+      return blocks;
+    }
+
+    for (const part of candidate.content.parts) {
       if (part.text) {
-        return {
+        blocks.push({
           type: MessageContentType.Text,
           text: part.text,
-        } as TextContentBlock;
-      }
-
-      if (part.thought) {
-        return {
-          type: MessageContentType.Thinking,
-          signature: part.thoughtSignature,
-          thinking: part.text,
-        } as ThinkingContentBlock;
+        } as TextContentBlock);
       }
 
       if (part.functionCall) {
-        return {
+        blocks.push({
           type: MessageContentType.ToolUse,
-          id: part.functionCall.id || uuid(),
+          id: uuid(),
           name: part.functionCall.name,
-          input: part.functionCall.args,
-        } as ToolUseContentBlock;
+          input: part.functionCall.args || {},
+        } as ToolUseContentBlock);
       }
+    }
 
-      this.logger.warn(`Unknown content type from Google: ${part}`);
-      return {
-        type: MessageContentType.Text,
-        text: JSON.stringify(part),
-      } as TextContentBlock;
-    });
+    return blocks;
   }
 }

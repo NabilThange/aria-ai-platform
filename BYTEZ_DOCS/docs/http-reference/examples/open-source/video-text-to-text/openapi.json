@@ -1,0 +1,222 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Open Source AI Models API – Multimodal",
+    "description": "API for running open-source AI models that take text, vision, audio, and video as input.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.bytez.com",
+      "description": "Production server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Set `Authorization` header to `BYTEZ_KEY` \n``` 'Authorization: YOUR_BYTEZ_KEY_HERE' ```\n"
+      }
+    }
+  },
+  "paths": {
+    "/models/v2/llava-hf/LLaVA-NeXT-Video-7B-hf": {
+      "post": {
+        "summary": "video-text-to-text",
+        "description": "Chat with AI models using text and videos. Also known as video-text-to-text",
+        "operationId": "video-text-to-text",
+        "requestBody": {
+          "description": "Schema for video-text-to-text models",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "messages": {
+                    "type": "array",
+                    "description": "Conversation history.",
+                    "example": [
+                      {
+                        "role": "user",
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "Describe this video"
+                          },
+                          {
+                            "type": "video",
+                            "url": "https://huggingface.co/datasets/raushan-testing-hf/videos-test/resolve/main/sample_demo_1.mp4"
+                          }
+                        ]
+                      }
+                    ],
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "role",
+                        "content"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "system",
+                            "user",
+                            "assistant"
+                          ]
+                        },
+                        "content": {
+                          "oneOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "type"
+                                ],
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "text",
+                                      "video"
+                                    ]
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  },
+                                  "base64": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean",
+                    "description": "Enable text streaming."
+                  },
+                  "params": {
+                    "type": "object",
+                    "description": "Model-specific parameters.",
+                    "properties": {
+                      "min_length": {
+                        "type": "integer",
+                        "description": "Minimum length of the generated text.",
+                        "example": 10
+                      },
+                      "max_length": {
+                        "type": "integer",
+                        "description": "Maximum length of the generated text.",
+                        "example": 100
+                      },
+                      "temperature": {
+                        "type": "number",
+                        "format": "float",
+                        "description": "Sampling temperature. Higher values = more random output.",
+                        "example": 0.5
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "messages"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful video-text-to-text response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "output"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Null on success; otherwise an error message."
+                    },
+                    "output": {
+                      "type": "object",
+                      "description": "The output message generated by the model",
+                      "example": {
+                        "role": "assistant",
+                        "content": " In this video, a toddler child is captured in the midst of an engaging and noisy activity. They are sitting on a wooden bed, busy with what appears to be a game or activity involving books. The child's face is framed by a pair of glasses that are being worn, and their hand is seen in motion, possibly pushing a button or perhaps interacting with a device. The child seems to be concentrating on something distant in their hand, with their body language suggesting a sense of excitement or engagement. The room appears to be a child's room, possibly with a greenish tone, and there's a white object in the background that resembles bedding, possibly children's furniture. Another player or toy is seen behind the child, contributing to the lively atmosphere. In front of the child, a blanket-like object could be perceived as a part of the game, its color or texture not clearly distinguishable. The tone of the video is lively, capturing everyday moments in an animated and playful context."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Auth error - check your api key and how you're sending it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    },
+                    "output": {
+                      "type": "string",
+                      "example": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests – You have hit the rate limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Rate limit exceeded"
+                    },
+                    "output": {
+                      "type": "string",
+                      "example": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    }
+  }
+}

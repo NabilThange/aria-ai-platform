@@ -1,0 +1,216 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Open Source AI Models API – Multimodal",
+    "description": "API for running open-source AI models that take text, vision, audio, and video as input.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.bytez.com",
+      "description": "Production server"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "apiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Set `Authorization` header to `BYTEZ_KEY` \n``` 'Authorization: YOUR_BYTEZ_KEY_HERE' ```\n"
+      }
+    }
+  },
+  "paths": {
+    "/models/v2/facebook/sam-vit-base": {
+      "post": {
+        "summary": "mask-generation",
+        "description": "Generate masks for objects in images for tasks like image segmentation, medical imaging, and computer vision applications",
+        "operationId": "mask-generation",
+        "requestBody": {
+          "description": "Schema for mask-generation models",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "example": "https://huggingface.co/datasets/huggingfacejs/tasks/resolve/main/mask-generation/mask-generation-input.png"
+                  },
+                  "base64": {
+                    "type": "string",
+                    "example": "data:image/png;base64,...BASE_64_GOES_HERE (Only use this is you are not using a url)"
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful mask-generation response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "output"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Null on success; otherwise an error message."
+                    },
+                    "output": {
+                      "type": "object",
+                      "description": "Successful response with the mask image URL",
+                      "properties": {
+                        "input_image_dimensions": {
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "number",
+                              "example": 1264
+                            },
+                            "height": {
+                              "type": "number",
+                              "example": 770
+                            }
+                          },
+                          "example": {
+                            "width": 1264,
+                            "height": 770
+                          }
+                        },
+                        "masks": {
+                          "type": "array",
+                          "example": [
+                            [
+                              [
+                                0,
+                                0,
+                                0
+                              ]
+                            ],
+                            [
+                              [
+                                1,
+                                1,
+                                1
+                              ]
+                            ],
+                            [
+                              [
+                                1,
+                                0,
+                                1
+                              ]
+                            ]
+                          ]
+                        },
+                        "scores": {
+                          "type": "array",
+                          "example": [
+                            0.996,
+                            0.999,
+                            0.601
+                          ]
+                        }
+                      },
+                      "example": {
+                        "input_image_dimensions": {
+                          "width": 1264,
+                          "height": 770
+                        },
+                        "masks": [
+                          [
+                            [
+                              0,
+                              0,
+                              0
+                            ]
+                          ],
+                          [
+                            [
+                              1,
+                              1,
+                              1
+                            ]
+                          ],
+                          [
+                            [
+                              1,
+                              0,
+                              1
+                            ]
+                          ]
+                        ],
+                        "scores": [
+                          0.996,
+                          0.999,
+                          0.601
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Auth error - check your api key and how you're sending it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    },
+                    "output": {
+                      "type": "string",
+                      "example": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests – You have hit the rate limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Rate limit exceeded"
+                    },
+                    "output": {
+                      "type": "string",
+                      "example": null
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "apiKeyAuth": []
+          }
+        ]
+      }
+    }
+  }
+}

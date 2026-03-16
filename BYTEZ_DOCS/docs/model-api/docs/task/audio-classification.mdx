@@ -1,0 +1,67 @@
+---
+title: 'audio-classification'
+description: Classify audio clips into predefined categories such as speech emotion, sound detection, and music genres
+icon: 'music-magnifying-glass'
+mode: 'wide'
+---
+
+<AccordionGroup>
+	<Accordion defaultOpen="true" title="Basic usage">
+		Send an audio file to a model for classification
+		<CodeGroup>
+			```javascript javascript
+			import Bytez from 'bytez.js';
+			
+			// insert your key
+			const sdk = new Bytez('BYTEZ_KEY');
+			
+			// choose your model
+			const model = sdk.model('aaraki/wav2vec2-base-finetuned-ks');
+			
+			// provide the model with input
+			const input = {
+			  "url": "https://huggingface.co/datasets/huggingfacejs/tasks/resolve/main/audio-classification/audio.wav"
+			};
+			
+			// send to the model
+			const { error, output } = await model.run(input);
+			
+			// observe the output
+			console.log({ error, output });
+			
+			```
+			```python python
+			from bytez import Bytez
+			
+			# insert your key
+			sdk = Bytez("BYTEZ_KEY")
+			
+			# choose your model
+			model = sdk.model("aaraki/wav2vec2-base-finetuned-ks")
+			
+			# provide the model with input
+			input = {
+			  "url": "https://huggingface.co/datasets/huggingfacejs/tasks/resolve/main/audio-classification/audio.wav"
+			}
+			
+			# send to the model
+			result = model.run(input)
+			
+			# observe the output
+			print({"error": result.error, "output": result.output})
+			
+			```
+			```bash http
+			curl -X POST 'https://api.bytez.com/models/v2/aaraki/wav2vec2-base-finetuned-ks' \
+			-H 'Authorization: BYTEZ_KEY' \
+			-H 'Content-Type: application/json' \
+			--data '{
+			  "url": "https://huggingface.co/datasets/huggingfacejs/tasks/resolve/main/audio-classification/audio.wav"
+			}'
+			```
+			You can send the **audio** via `url` or `base64` data URL.
+			
+			We recommend `url` for better performance, as `base64` increases payload size.
+		</CodeGroup>
+	</Accordion>
+</AccordionGroup>

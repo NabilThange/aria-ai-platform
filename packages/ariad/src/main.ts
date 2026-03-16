@@ -3,9 +3,13 @@ import { AppModule } from './app.module';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import * as express from 'express';
 import { json, urlencoded } from 'express';
+import { Logger } from 'nestjs-pino';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+
+  // Use pino as the application logger
+  app.useLogger(app.get(Logger));
 
   // Configure body parser with increased payload size limit (50MB)
   app.use(json({ limit: '50mb' }));
@@ -32,7 +36,18 @@ async function bootstrap() {
     if (req.url?.startsWith('/websockify')) {
       wsProxy.upgrade(req, socket, head);
     }
-    // else let Socket.IO/Nest handle it by not hijacking the socket
   });
+
+  const logger = app.get(Logger);
+  logger.log(
+    { event: 'app.started', port: 9990, env: process.env.NODE_ENV ?? 'development' },
+    'ariad started',
+  );
 }
-bootstrap();
+
+bootstrap().catch((err) => {
+  process.stderr.write(
+    JSON.stringify({ level: 'fatal', msg: 'Bootstrap failed', err: String(err) }) + '\n',
+  );
+  process.exit(1);
+});

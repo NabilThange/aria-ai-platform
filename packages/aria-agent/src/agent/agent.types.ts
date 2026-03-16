@@ -21,7 +21,7 @@ export interface BytebotAgentService {
 }
 
 export interface BytebotAgentModel {
-  provider: 'google' | 'groq' | 'openrouter' | 'bytez';
+  provider: 'groq' | 'bytez' | 'google';
   name: string;
   title: string;
   contextWindow?: number;

@@ -1,0 +1,439 @@
+---
+title: 'Get started'
+description: Use the latest AI chat models
+icon: 'comments'
+mode: 'wide'
+---
+
+<AccordionGroup>
+	<Accordion defaultOpen="true" title="Basic usage">
+		
+		<CodeGroup>
+			```javascript javascript
+			import Bytez from 'bytez.js';
+			
+			// insert your key
+			const sdk = new Bytez('BYTEZ_KEY');
+			
+			// choose your model
+			const model = sdk.model('Qwen/Qwen3-4B');
+			
+			// provide the model with input
+			const input = [
+			  {
+			    "role": "system",
+			    "content": "You are a friendly chatbot"
+			  },
+			  {
+			    "role": "assistant",
+			    "content": "Hello, I'm a friendly bot"
+			  },
+			  {
+			    "role": "user",
+			    "content": "Hello bot, what is the capital of England?"
+			  }
+			];
+			
+			// send to the model
+			const { error, output } = await model.run(input);
+			
+			// observe the output
+			console.log({ error, output });
+			
+			```
+			```python python
+			from bytez import Bytez
+			
+			# insert your key
+			sdk = Bytez("BYTEZ_KEY")
+			
+			# choose your model
+			model = sdk.model("Qwen/Qwen3-4B")
+			
+			# provide the model with input
+			input = [
+			  {
+			    "role": "system",
+			    "content": "You are a friendly chatbot"
+			  },
+			  {
+			    "role": "assistant",
+			    "content": "Hello, I'm a friendly bot"
+			  },
+			  {
+			    "role": "user",
+			    "content": "Hello bot, what is the capital of England?"
+			  }
+			]
+			
+			# send to the model
+			result = model.run(input)
+			
+			# observe the output
+			print({"error": result.error, "output": result.output})
+			
+			```
+			```bash http
+			curl -X POST 'https://api.bytez.com/models/v2/Qwen/Qwen3-4B' \
+			-H 'Authorization: BYTEZ_KEY' \
+			-H 'Content-Type: application/json' \
+			--data '{
+			  "messages": [
+			    {
+			      "role": "system",
+			      "content": "You are a friendly chatbot"
+			    },
+			    {
+			      "role": "assistant",
+			      "content": "Hello, I'm a friendly bot"
+			    },
+			    {
+			      "role": "user",
+			      "content": "Hello bot, what is the capital of England?"
+			    }
+			  ]
+			}'
+			```
+		</CodeGroup>
+	</Accordion>
+	<Accordion defaultOpen="false" title="Add params">
+		
+		<CodeGroup>
+			```javascript javascript
+			import Bytez from 'bytez.js';
+			
+			// insert your key
+			const sdk = new Bytez('BYTEZ_KEY');
+			
+			// choose your model
+			const model = sdk.model('Qwen/Qwen3-4B');
+			
+			// provide the model with input
+			const input = [
+			  {
+			    "role": "system",
+			    "content": "You are a friendly chatbot"
+			  },
+			  {
+			    "role": "assistant",
+			    "content": "Hello, I'm a friendly bot"
+			  },
+			  {
+			    "role": "user",
+			    "content": "Hello bot, what is the capital of England?"
+			  }
+			];
+			
+			// provide the model with params
+			const params = {
+			  "temperature": 0
+			};
+			
+			// send to the model
+			const { error, output } = await model.run(input, params);
+			
+			// observe the output
+			console.log({ error, output });
+			
+			```
+			```python python
+			from bytez import Bytez
+			
+			# insert your key
+			sdk = Bytez("BYTEZ_KEY")
+			
+			# choose your model
+			model = sdk.model("Qwen/Qwen3-4B")
+			
+			# provide the model with input
+			input = [
+			  {
+			    "role": "system",
+			    "content": "You are a friendly chatbot"
+			  },
+			  {
+			    "role": "assistant",
+			    "content": "Hello, I'm a friendly bot"
+			  },
+			  {
+			    "role": "user",
+			    "content": "Hello bot, what is the capital of England?"
+			  }
+			]
+			
+			# provide the model with params
+			params = {
+			  "temperature": 0
+			}
+			
+			# send to the model
+			result = model.run(input, params)
+			
+			# observe the output
+			print({"error": result.error, "output": result.output})
+			
+			```
+			```bash http
+			curl -X POST 'https://api.bytez.com/models/v2/Qwen/Qwen3-4B' \
+			-H 'Authorization: BYTEZ_KEY' \
+			-H 'Content-Type: application/json' \
+			--data '{
+			  "messages": [
+			    {
+			      "role": "system",
+			      "content": "You are a friendly chatbot"
+			    },
+			    {
+			      "role": "assistant",
+			      "content": "Hello, I'm a friendly bot"
+			    },
+			    {
+			      "role": "user",
+			      "content": "Hello bot, what is the capital of England?"
+			    }
+			  ],
+			  "params": {
+			    "temperature": 0
+			  }
+			}'
+			```
+		</CodeGroup>
+	</Accordion>
+	<Accordion defaultOpen="false" title="Stream text">
+		
+		<CodeGroup>
+			```javascript javascript
+			import Bytez from 'bytez.js';
+			
+			// insert your key
+			const sdk = new Bytez('BYTEZ_KEY');
+			
+			// choose your model
+			const model = sdk.model('Qwen/Qwen3-4B');
+			
+			// provide the model with input
+			const input = [
+			  {
+			    "role": "system",
+			    "content": "You are a friendly chatbot"
+			  },
+			  {
+			    "role": "assistant",
+			    "content": "Hello, I'm a friendly bot"
+			  },
+			  {
+			    "role": "user",
+			    "content": "Hello bot, what is the capital of England?"
+			  }
+			];
+			
+			// set streaming to "true"
+			const stream = true;
+			
+			// send to the model
+			const readStream = await model.run(input, stream);
+			
+			let text = '';
+			
+			for await (const tokens of readStream) {
+			  text += tokens;
+			
+			  console.log(tokens);
+			}
+			
+			// observe the output
+			console.log({ text });
+			
+			```
+			```python python
+			from bytez import Bytez
+			
+			# insert your key
+			sdk = Bytez("BYTEZ_KEY")
+			
+			# choose your model
+			model = sdk.model("Qwen/Qwen3-4B")
+			
+			# provide the model with input
+			input = [
+			  {
+			    "role": "system",
+			    "content": "You are a friendly chatbot"
+			  },
+			  {
+			    "role": "assistant",
+			    "content": "Hello, I'm a friendly bot"
+			  },
+			  {
+			    "role": "user",
+			    "content": "Hello bot, what is the capital of England?"
+			  }
+			]
+			
+			# set streaming to "true"
+			stream = True
+			
+			# send to the model
+			readStream = model.run(input, stream=stream)
+			
+			text = ""
+			
+			for tokens in readStream:
+			    text += tokens
+			
+			    print(tokens)
+			
+			# observe the output
+			print({"text": text})
+			
+			```
+			```bash http
+			curl -X POST 'https://api.bytez.com/models/v2/Qwen/Qwen3-4B' \
+			-H 'Authorization: BYTEZ_KEY' \
+			-H 'Content-Type: application/json' \
+			--data '{
+			  "messages": [
+			    {
+			      "role": "system",
+			      "content": "You are a friendly chatbot"
+			    },
+			    {
+			      "role": "assistant",
+			      "content": "Hello, I'm a friendly bot"
+			    },
+			    {
+			      "role": "user",
+			      "content": "Hello bot, what is the capital of England?"
+			    }
+			  ],
+			  "stream": true
+			}'
+			```
+		</CodeGroup>
+	</Accordion>
+	<Accordion defaultOpen="false" title="Add params + Stream text">
+		
+		<CodeGroup>
+			```javascript javascript
+			import Bytez from 'bytez.js';
+			
+			// insert your key
+			const sdk = new Bytez('BYTEZ_KEY');
+			
+			// choose your model
+			const model = sdk.model('Qwen/Qwen3-4B');
+			
+			// provide the model with input
+			const input = [
+			  {
+			    "role": "system",
+			    "content": "You are a friendly chatbot"
+			  },
+			  {
+			    "role": "assistant",
+			    "content": "Hello, I'm a friendly bot"
+			  },
+			  {
+			    "role": "user",
+			    "content": "Hello bot, what is the capital of England?"
+			  }
+			];
+			
+			// provide the model with params
+			const params = {
+			  "temperature": 0
+			};
+			
+			// set streaming to "true"
+			const stream = true;
+			
+			// send to the model
+			const readStream = await model.run(input, params, stream);
+			
+			let text = '';
+			
+			for await (const tokens of readStream) {
+			  text += tokens;
+			
+			  console.log(tokens);
+			}
+			
+			// observe the output
+			console.log({ text });
+			
+			```
+			```python python
+			from bytez import Bytez
+			
+			# insert your key
+			sdk = Bytez("BYTEZ_KEY")
+			
+			# choose your model
+			model = sdk.model("Qwen/Qwen3-4B")
+			
+			# provide the model with input
+			input = [
+			  {
+			    "role": "system",
+			    "content": "You are a friendly chatbot"
+			  },
+			  {
+			    "role": "assistant",
+			    "content": "Hello, I'm a friendly bot"
+			  },
+			  {
+			    "role": "user",
+			    "content": "Hello bot, what is the capital of England?"
+			  }
+			]
+			
+			# provide the model with params
+			params = {
+			  "temperature": 0
+			}
+			
+			# set streaming to "true"
+			stream = True
+			
+			# send to the model
+			readStream = model.run(input, params, stream)
+			
+			text = ""
+			
+			for tokens in readStream:
+			    text += tokens
+			
+			    print(tokens)
+			
+			# observe the output
+			print({"text": text})
+			
+			```
+			```bash http
+			curl -X POST 'https://api.bytez.com/models/v2/Qwen/Qwen3-4B' \
+			-H 'Authorization: BYTEZ_KEY' \
+			-H 'Content-Type: application/json' \
+			--data '{
+			  "messages": [
+			    {
+			      "role": "system",
+			      "content": "You are a friendly chatbot"
+			    },
+			    {
+			      "role": "assistant",
+			      "content": "Hello, I'm a friendly bot"
+			    },
+			    {
+			      "role": "user",
+			      "content": "Hello bot, what is the capital of England?"
+			    }
+			  ],
+			  "params": {
+			    "temperature": 0
+			  },
+			  "stream": true
+			}'
+			```
+		</CodeGroup>
+	</Accordion>
+</AccordionGroup>

@@ -1,4 +1,5 @@
 import { Message, Task, Model, GroupedMessages, FileWithBase64, TaskStatus, ModelsResponse } from "@/types";
+import { logger } from "@/lib/logger";
 
 /**
  * Base configuration for API requests
@@ -36,7 +37,7 @@ async function apiRequest<T>(
 
     return await response.json();
   } catch (error) {
-    console.error(`Error in API request to ${endpoint}:`, error);
+    logger.error({ event: 'api.request_failed', endpoint }, `Error in API request to ${endpoint}`, error instanceof Error ? error : undefined);
     return null;
   }
 }
@@ -125,7 +126,6 @@ export async function startTask(data: {
   description: string;
   model: Model;
   files?: FileWithBase64[];
-  planningEnabled?: boolean;
 }): Promise<Task | null> {
   return apiRequest<Task>("/tasks", {
     method: "POST",
@@ -211,7 +211,7 @@ export async function fetchTaskCounts(): Promise<Record<string, number>> {
 
     return counts;
   } catch (error) {
-    console.error("Failed to fetch task counts:", error);
+    logger.error({ event: 'task_counts.fetch_failed' }, 'Failed to fetch task counts', error instanceof Error ? error : undefined);
     return {
       ALL: 0,
       ACTIVE: 0,
@@ -233,7 +233,7 @@ export async function fetchModels(): Promise<ModelsResponse> {
     }
     return await response.json();
   } catch (error) {
-    console.error("Error fetching models:", error);
+    logger.error({ event: 'models.fetch_failed' }, 'Error fetching models', error instanceof Error ? error : undefined);
     return {
       grouped: { google: [], groq: [], openrouter: [], bytez: [] },
       flat: [],

@@ -22,6 +22,9 @@ import { AddTaskMessageDto } from './dto/add-task-message.dto';
 import { TasksGateway } from './tasks.gateway';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SharedStateService } from '../shared-state/shared-state.service';
+import { AgentsService } from '../agents/agents.service';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
 export class TasksService {
@@ -33,6 +36,9 @@ export class TasksService {
     private readonly tasksGateway: TasksGateway,
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly sharedStateService: SharedStateService,
+    private readonly agentsService: AgentsService,
+    private readonly redisService: RedisService,
   ) {
     this.logger.log('TasksService initialized');
   }
@@ -45,6 +51,24 @@ export class TasksService {
     const task = await this.prisma.$transaction(async (prisma) => {
       // Create the task first
       this.logger.debug('Creating task record in database');
+      
+      // Get default model from agent configuration if not provided
+      let taskModel = createTaskDto.model;
+      if (!taskModel) {
+        const orchestratorConfig = this.agentsService.getAgentModel('ORCHESTRATOR');
+        if (orchestratorConfig) {
+          taskModel = { 
+            provider: orchestratorConfig.provider, 
+            name: orchestratorConfig.model 
+          };
+          this.logger.log(`Using ORCHESTRATOR agent config: ${orchestratorConfig.model}`);
+        } else {
+          // Final fallback to hardcoded default
+          taskModel = { provider: 'bytez', name: 'anthropic/claude-sonnet-4-6' };
+          this.logger.warn('No agent config found, using hardcoded default model');
+        }
+      }
+      
       const task = await prisma.task.create({
         data: {
           description: createTaskDto.description,
@@ -52,8 +76,7 @@ export class TasksService {
           priority: createTaskDto.priority || TaskPriority.MEDIUM,
           status: TaskStatus.PENDING,
           createdBy: createTaskDto.createdBy || Role.USER,
-          model: createTaskDto.model,
-          planningEnabled: createTaskDto.planningEnabled || false,
+          model: taskModel,
           ...(createTaskDto.scheduledFor
             ? { scheduledFor: createTaskDto.scheduledFor }
             : {}),
@@ -111,6 +134,13 @@ export class TasksService {
 
       return task;
     });
+
+    // Publish task.pending event to trigger scheduler
+    if (task.status === TaskStatus.PENDING) {
+      this.redisService.getClient().publish('aria:tasks:pending', task.id).catch(err => {
+        this.logger.error(`Failed to publish task pending event: ${err.message}`);
+      });
+    }
 
     this.tasksGateway.emitTaskCreated(task);
 
@@ -231,10 +261,15 @@ export class TasksService {
       data: updateTaskDto,
     });
 
+    // Publish task.pending event if transitioning to PENDING
+    if (updateTaskDto.status === TaskStatus.PENDING) {
+      this.redisService.getClient().publish('aria:tasks:pending', id).catch(err => {
+        this.logger.error(`Failed to publish task pending event: ${err.message}`);
+      });
+    }
+
     if (updateTaskDto.status === TaskStatus.COMPLETED) {
       this.eventEmitter.emit('task.completed', { taskId: id });
-    } else if (updateTaskDto.status === TaskStatus.NEEDS_HELP) {
-      updatedTask = await this.takeOver(id);
     } else if (updateTaskDto.status === TaskStatus.FAILED) {
       this.eventEmitter.emit('task.failed', { taskId: id });
     }
@@ -277,6 +312,13 @@ export class TasksService {
     });
 
     this.tasksGateway.emitNewMessage(taskId, message);
+    
+    // If task is paused for clarification (NEEDS_HELP + USER control), automatically resume
+    if (task.status === TaskStatus.NEEDS_HELP && task.control === Role.USER) {
+      this.logger.log(`User provided message during clarification, automatically resuming task ${taskId}`);
+      await this.resume(taskId);
+    }
+    
     return task;
   }
 
@@ -384,10 +426,124 @@ export class TasksService {
 
     // Broadcast cancel event so AgentProcessor can cancel processing
     this.eventEmitter.emit('task.cancel', { taskId });
+    
+    // Cleanup task-scoped resources (PinchTab instances, etc.)
+    this.eventEmitter.emit('task.cleanup', { taskId });
 
     this.logger.log(`Task ${taskId} cancelled and marked as failed`);
     this.tasksGateway.emitTaskUpdate(taskId, updatedTask);
 
     return updatedTask;
+  }
+
+  async getSharedState(taskId: string): Promise<Record<string, any>> {
+    this.logger.log(`Retrieving shared state for task ID: ${taskId}`);
+
+    // Verify task exists
+    const task = await this.findById(taskId);
+    if (!task) {
+      throw new NotFoundException(`Task with ID ${taskId} not found`);
+    }
+
+    try {
+      const state = await this.sharedStateService.getTaskState(taskId);
+      this.logger.debug(`Retrieved ${Object.keys(state).length} keys from shared state for task ${taskId}`);
+      return state;
+    } catch (error) {
+      this.logger.error(`Error retrieving shared state for task ${taskId}:`, error);
+      throw error;
+    }
+  }
+
+  async getClarificationSession(taskId: string): Promise<any> {
+    this.logger.log(`Retrieving clarification session for task ID: ${taskId}`);
+
+    // Verify task exists
+    const task = await this.findById(taskId);
+    if (!task) {
+      throw new NotFoundException(`Task with ID ${taskId} not found`);
+    }
+
+    try {
+      const session = await this.sharedStateService.get(taskId, 'clarification_session');
+      return session || { status: 'not_started' };
+    } catch (error) {
+      this.logger.error(`Error retrieving clarification session for task ${taskId}:`, error);
+      throw error;
+    }
+  }
+
+  async submitClarificationAnswer(
+    taskId: string,
+    questionId: string,
+    answer: string,
+  ): Promise<any> {
+    this.logger.log(`Submitting clarification answer for task ${taskId}, question ${questionId}`);
+
+    // Verify task exists
+    const task = await this.findById(taskId);
+    if (!task) {
+      throw new NotFoundException(`Task with ID ${taskId} not found`);
+    }
+
+    try {
+      // Get current session
+      const session = await this.sharedStateService.get<any>(taskId, 'clarification_session');
+      if (!session) {
+        throw new BadRequestException('No clarification session found');
+      }
+
+      // Add answer
+      const existingAnswerIndex = session.answers.findIndex(
+        (a: any) => a.questionId === questionId,
+      );
+      if (existingAnswerIndex >= 0) {
+        session.answers[existingAnswerIndex].answer = answer;
+      } else {
+        session.answers.push({ questionId, answer });
+      }
+
+      // Check if all questions are answered
+      if (session.answers.length === session.questions.length) {
+        session.status = 'completed';
+        // Emit event to resume task processing
+        this.eventEmitter.emit('clarification.completed', { taskId });
+      }
+
+      // Save updated session
+      await this.sharedStateService.set(taskId, 'clarification_session', session);
+
+      return session;
+    } catch (error) {
+      this.logger.error(`Error submitting clarification answer for task ${taskId}:`, error);
+      throw error;
+    }
+  }
+
+  async skipClarification(taskId: string): Promise<any> {
+    this.logger.log(`Skipping clarification for task ${taskId}`);
+
+    // Verify task exists
+    const task = await this.findById(taskId);
+    if (!task) {
+      throw new NotFoundException(`Task with ID ${taskId} not found`);
+    }
+
+    try {
+      // Get current session
+      const session = await this.sharedStateService.get<any>(taskId, 'clarification_session');
+      if (session) {
+        session.status = 'skipped';
+        await this.sharedStateService.set(taskId, 'clarification_session', session);
+      }
+
+      // Emit event to resume task processing
+      this.eventEmitter.emit('clarification.skipped', { taskId });
+
+      return { status: 'skipped' };
+    } catch (error) {
+      this.logger.error(`Error skipping clarification for task ${taskId}:`, error);
+      throw error;
+    }
   }
 }

@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { startTask } from "@/utils/taskUtils";
 import { Model, ModelsResponse, GroupedModels } from "@/types";
 import { TaskList } from "@/components/tasks/TaskList";
-import { ModelSelector } from "@/components/models/ModelSelector";
+import { logger } from "@/lib/logger";
 
 interface StockPhotoProps {
   src: string;
@@ -38,33 +38,13 @@ interface FileWithBase64 {
 export default function Home() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [models, setModels] = useState<Model[]>([]);
-  const [groupedModels, setGroupedModels] = useState<GroupedModels>({
-    google: [],
-    groq: [],
-    openrouter: [],
-    bytez: [],
-  });
-  const [selectedModel, setSelectedModel] = useState<Model | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<FileWithBase64[]>([]);
-  const [planningEnabled, setPlanningEnabled] = useState(false);
   const router = useRouter();
   const [activePopoverIndex, setActivePopoverIndex] = useState<number | null>(
     null,
   );
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonsRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    fetch("/api/tasks/models")
-      .then((res) => res.json())
-      .then((data: ModelsResponse) => {
-        setModels(data.flat);
-        setGroupedModels(data.grouped);
-        if (data.flat.length > 0) setSelectedModel(data.flat[0]);
-      })
-      .catch((err) => console.error("Failed to load models", err));
-  }, []);
 
   // Close popover when clicking outside or pressing ESC
   useEffect(() => {
@@ -102,17 +82,33 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      if (!selectedModel) throw new Error("No model selected");
+      // Fetch current ORCHESTRATOR model from agent config
+      let orchestratorModel: Model | undefined;
+      try {
+        const agentConfigResponse = await fetch("/api/agents/config");
+        if (agentConfigResponse.ok) {
+          const agentConfig = await agentConfigResponse.json();
+          const orchestratorConfig = agentConfig.agents?.find((a: any) => a.name === 'ORCHESTRATOR');
+          if (orchestratorConfig) {
+            orchestratorModel = {
+              provider: orchestratorConfig.provider,
+              name: orchestratorConfig.model,
+            };
+            logger.debug({ event: 'task.model_selected', model: orchestratorModel }, 'Using ORCHESTRATOR model for task');
+          }
+        }
+      } catch (error) {
+        logger.warn({ event: 'task.model_fetch_failed' }, 'Failed to fetch agent config, will use backend default', error instanceof Error ? error : undefined);
+      }
+
       // Send request to start a new task
       const taskData: {
         description: string;
-        model: Model;
+        model?: Model;
         files?: FileWithBase64[];
-        planningEnabled?: boolean;
       } = {
         description: input,
-        model: selectedModel,
-        planningEnabled,
+        ...(orchestratorModel && { model: orchestratorModel }),
       };
 
       // Include files if any are uploaded
@@ -126,11 +122,10 @@ export default function Home() {
         // Redirect to the task page
         router.push(`/tasks/${task.id}`);
       } else {
-        // Handle error
-        console.error("Failed to create task");
+        logger.warn({ event: 'task.create_failed' }, 'Failed to create task');
       }
     } catch (error) {
-      console.error("Error sending message:", error);
+      logger.error({ event: 'task.create_error' }, 'Error sending message', error instanceof Error ? error : undefined);
     } finally {
       setIsLoading(false);
     }
@@ -164,17 +159,7 @@ export default function Home() {
                   onSend={handleSend}
                   onFileUpload={handleFileUpload}
                   minLines={3}
-                  planningEnabled={planningEnabled}
-                  onPlanningToggle={setPlanningEnabled}
                 />
-                <div className="mt-2">
-                  <ModelSelector
-                    models={models}
-                    groupedModels={groupedModels}
-                    selectedModel={selectedModel}
-                    onModelChange={setSelectedModel}
-                  />
-                </div>
               </div>
 
               <TaskList
@@ -211,17 +196,7 @@ export default function Home() {
                   onSend={handleSend}
                   onFileUpload={handleFileUpload}
                   minLines={3}
-                  planningEnabled={planningEnabled}
-                  onPlanningToggle={setPlanningEnabled}
                 />
-                <div className="mt-2">
-                  <ModelSelector
-                    models={models}
-                    groupedModels={groupedModels}
-                    selectedModel={selectedModel}
-                    onModelChange={setSelectedModel}
-                  />
-                </div>
               </div>
 
               <TaskList

@@ -7,7 +7,13 @@ export declare enum MessageContentType {
     ToolResult = "tool_result",
     Thinking = "thinking",
     RedactedThinking = "redacted_thinking",
-    UserAction = "user_action"
+    UserAction = "user_action",
+    AgentThinking = "agent_thinking",
+    AgentPlan = "agent_plan",
+    AgentVerify = "agent_verify",
+    AgentQuestion = "agent_question",
+    AgentRecovery = "agent_recovery",
+    AgentReport = "agent_report"
 }
 export type MessageContentBlockBase = {
     type: MessageContentType;
@@ -185,4 +191,59 @@ export type ToolResultContentBlock = {
     content: MessageContentBlock[];
     is_error?: boolean;
 } & MessageContentBlockBase;
-export type MessageContentBlock = TextContentBlock | ImageContentBlock | DocumentContentBlock | ToolUseContentBlock | ThinkingContentBlock | RedactedThinkingContentBlock | UserActionContentBlock | ComputerToolUseContentBlock | ToolResultContentBlock;
+export type AgentThinkingContentBlock = {
+    type: MessageContentType.AgentThinking;
+    agent: "CLARIFIER" | "ORCHESTRATOR" | "WEB" | "DESKTOP" | "PERCEPTION" | "VERIFIER" | "RECOVERY" | "REPORTER";
+    thinking: string;
+    timestamp: string;
+} & MessageContentBlockBase;
+export type AgentPlanContentBlock = {
+    type: MessageContentType.AgentPlan;
+    agent: "ORCHESTRATOR";
+    plan: {
+        steps: Array<{
+            id: string;
+            type: "web" | "desktop";
+            description: string;
+            success_criteria: string;
+        }>;
+    };
+    timestamp: string;
+} & MessageContentBlockBase;
+export type AgentVerifyContentBlock = {
+    type: MessageContentType.AgentVerify;
+    agent: "VERIFIER";
+    verification: {
+        action_succeeded: boolean;
+        error_message?: string;
+        confidence: number;
+    };
+    timestamp: string;
+} & MessageContentBlockBase;
+export type AgentQuestionContentBlock = {
+    type: MessageContentType.AgentQuestion;
+    agent: "CLARIFIER";
+    question: string;
+    timestamp: string;
+} & MessageContentBlockBase;
+export type AgentRecoveryContentBlock = {
+    type: MessageContentType.AgentRecovery;
+    agent: "RECOVERY";
+    strategy: {
+        strategy: string;
+        avoid: string[];
+        approach: string;
+    };
+    timestamp: string;
+} & MessageContentBlockBase;
+export type AgentReportContentBlock = {
+    type: MessageContentType.AgentReport;
+    agent: "REPORTER";
+    report: {
+        summary: string;
+        steps_completed: number;
+        total_steps: number;
+    };
+    timestamp: string;
+} & MessageContentBlockBase;
+export type MessageContentBlock = TextContentBlock | ImageContentBlock | DocumentContentBlock | ToolUseContentBlock | ThinkingContentBlock | RedactedThinkingContentBlock | UserActionContentBlock | ComputerToolUseContentBlock | ToolResultContentBlock | AgentThinkingContentBlock | AgentPlanContentBlock | AgentVerifyContentBlock | AgentQuestionContentBlock | AgentRecoveryContentBlock | AgentReportContentBlock;

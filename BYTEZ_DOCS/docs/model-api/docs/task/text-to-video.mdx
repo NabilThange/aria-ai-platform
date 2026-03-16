@@ -1,0 +1,60 @@
+---
+title: 'text-to-video'
+description: Generate videos from textual descriptions for applications like content creation, entertainment, and education
+icon: 'video'
+mode: 'wide'
+---
+
+<AccordionGroup>
+	<Accordion defaultOpen="true" title="Basic usage">
+		Send a text prompt to generate a video output
+		<CodeGroup>
+			```javascript javascript
+			import Bytez from 'bytez.js';
+			
+			// insert your key
+			const sdk = new Bytez('BYTEZ_KEY');
+			
+			// choose your model
+			const model = sdk.model('ali-vilab/text-to-video-ms-1.7b');
+			
+			// provide the model with input
+			const input = "A cat playing with a rose";
+			
+			// send to the model
+			const { error, output } = await model.run(input);
+			
+			// observe the output
+			console.log({ error, output });
+			
+			```
+			```python python
+			from bytez import Bytez
+			
+			# insert your key
+			sdk = Bytez("BYTEZ_KEY")
+			
+			# choose your model
+			model = sdk.model("ali-vilab/text-to-video-ms-1.7b")
+			
+			# provide the model with input
+			input = "A cat playing with a rose"
+			
+			# send to the model
+			result = model.run(input)
+			
+			# observe the output
+			print({"error": result.error, "output": result.output})
+			
+			```
+			```bash http
+			curl -X POST 'https://api.bytez.com/models/v2/ali-vilab/text-to-video-ms-1.7b' \
+			-H 'Authorization: BYTEZ_KEY' \
+			-H 'Content-Type: application/json' \
+			--data '{
+			  "text": "A cat playing with a rose"
+			}'
+			```
+		</CodeGroup>
+	</Accordion>
+</AccordionGroup>

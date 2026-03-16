@@ -523,13 +523,13 @@ V, W, X, Y, Z
     application,
   }: {
     application:
-      | 'firefox'
-      | '1password'
-      | 'thunderbird'
+      | 'chromium'
+      | 'gmail'
       | 'vscode'
       | 'terminal'
-      | 'desktop'
-      | 'directory';
+      | 'thunar'
+      | 'mousepad'
+      | 'desktop';
   }) {
     try {
       await this.computerUse.action({ action: 'application', application });

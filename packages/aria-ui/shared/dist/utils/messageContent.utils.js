@@ -29,6 +29,12 @@ exports.isSetTaskStatusToolUseBlock = isSetTaskStatusToolUseBlock;
 exports.isCreateTaskToolUseBlock = isCreateTaskToolUseBlock;
 exports.isWriteFileToolUseBlock = isWriteFileToolUseBlock;
 exports.isReadFileToolUseBlock = isReadFileToolUseBlock;
+exports.isAgentThinkingContentBlock = isAgentThinkingContentBlock;
+exports.isAgentPlanContentBlock = isAgentPlanContentBlock;
+exports.isAgentVerifyContentBlock = isAgentVerifyContentBlock;
+exports.isAgentQuestionContentBlock = isAgentQuestionContentBlock;
+exports.isAgentRecoveryContentBlock = isAgentRecoveryContentBlock;
+exports.isAgentReportContentBlock = isAgentReportContentBlock;
 const messageContent_types_1 = require("../types/messageContent.types");
 function isTextContentBlock(obj) {
     if (!obj || typeof obj !== "object") {
@@ -279,5 +285,69 @@ function isReadFileToolUseBlock(obj) {
     }
     const block = obj;
     return block.name === "computer_read_file";
+}
+function isAgentThinkingContentBlock(obj) {
+    if (!obj || typeof obj !== "object") {
+        return false;
+    }
+    const block = obj;
+    return (block.type === messageContent_types_1.MessageContentType.AgentThinking &&
+        typeof block.agent === "string" &&
+        typeof block.thinking === "string" &&
+        typeof block.timestamp === "string");
+}
+function isAgentPlanContentBlock(obj) {
+    if (!obj || typeof obj !== "object") {
+        return false;
+    }
+    const block = obj;
+    return (block.type === messageContent_types_1.MessageContentType.AgentPlan &&
+        block.agent === "ORCHESTRATOR" &&
+        block.plan !== undefined &&
+        Array.isArray(block.plan.steps) &&
+        typeof block.timestamp === "string");
+}
+function isAgentVerifyContentBlock(obj) {
+    if (!obj || typeof obj !== "object") {
+        return false;
+    }
+    const block = obj;
+    return (block.type === messageContent_types_1.MessageContentType.AgentVerify &&
+        block.agent === "VERIFIER" &&
+        block.verification !== undefined &&
+        typeof block.verification.action_succeeded === "boolean" &&
+        typeof block.timestamp === "string");
+}
+function isAgentQuestionContentBlock(obj) {
+    if (!obj || typeof obj !== "object") {
+        return false;
+    }
+    const block = obj;
+    return (block.type === messageContent_types_1.MessageContentType.AgentQuestion &&
+        block.agent === "CLARIFIER" &&
+        typeof block.question === "string" &&
+        typeof block.timestamp === "string");
+}
+function isAgentRecoveryContentBlock(obj) {
+    if (!obj || typeof obj !== "object") {
+        return false;
+    }
+    const block = obj;
+    return (block.type === messageContent_types_1.MessageContentType.AgentRecovery &&
+        block.agent === "RECOVERY" &&
+        block.strategy !== undefined &&
+        typeof block.strategy.strategy === "string" &&
+        typeof block.timestamp === "string");
+}
+function isAgentReportContentBlock(obj) {
+    if (!obj || typeof obj !== "object") {
+        return false;
+    }
+    const block = obj;
+    return (block.type === messageContent_types_1.MessageContentType.AgentReport &&
+        block.agent === "REPORTER" &&
+        block.report !== undefined &&
+        typeof block.report.summary === "string" &&
+        typeof block.timestamp === "string");
 }
 //# sourceMappingURL=messageContent.utils.js.map

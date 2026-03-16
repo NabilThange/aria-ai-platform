@@ -1,0 +1,109 @@
+
+C:\Users\thang\Downloads>test_groq_all_models.py
+
+╔══════════════════════════════════════════════════════════════════╗
+║        BYTEZ ANTHROPIC — CONFIRMED WORKING (FIXED PARSER)        ║
+║                       2026-03-14  18:43:14                       ║
+╚══════════════════════════════════════════════════════════════════╝
+
+  KEY FIX: tool calls live in data['provider']['content'],
+  not data['output'] — previous parser was reading wrong field!
+
+
+  ▶ claude-haiku-4-5
+    b64 + params.tools + auto                ★ IMAGE+TOOL ✅  2.01s
+       TOOL: click_element({"element": "Red button", "x": 120, "y": 80})
+    b64 + params.tools + any                 ★ IMAGE+TOOL ✅  1.46s
+       TOOL: click_element({"element": "Red button", "x": 120, "y": 80})
+    url(gstatic) + tools + any               ★ IMAGE+TOOL ✅  1.61s
+       TOOL: click_element({"element": "Red button", "x": 120, "y": 80})
+    url(picsum) + tools + any                ★ IMAGE+TOOL ✅  1.43s
+       TOOL: click_element({"element": "Red button", "x": 120, "y": 80})
+    image_only + force_tool                  ★ IMAGE+TOOL ✅  1.32s
+       TOOL: click_element({"element": "red square", "x": 16, "y": 16})
+
+  ▶ claude-sonnet-4-6
+    b64 + params.tools + auto                ★ IMAGE+TOOL ✅  3.05s
+       text: Sure! I'll click the red button at coordinates (120, 80) right away! Sure! I'll click the red button at coordinates (120
+       TOOL: click_element({"element": "Red button", "x": 120, "y": 80})
+    b64 + params.tools + any                 ★ IMAGE+TOOL ✅  3.34s
+       TOOL: click_element({"element": "Red button", "x": 120, "y": 80})
+    url(gstatic) + tools + any               ★ IMAGE+TOOL ✅  2.37s
+       TOOL: click_element({"element": "Red button", "x": 120, "y": 80})
+    url(picsum) + tools + any                ★ IMAGE+TOOL ✅  4.08s
+       TOOL: click_element({"element": "Red button", "x": 120, "y": 80})
+    image_only + force_tool                  ★ IMAGE+TOOL ✅  2.32s
+       TOOL: click_element({"element": "red square", "x": 45, "y": 45})
+
+  ▶ claude-opus-4-6
+    b64 + params.tools + auto                ✘ You need a min balance of 0.4180164 credits to access t  0.47s
+    b64 + params.tools + any                 ✘ You need a min balance of 0.4180164 credits to access t  0.62s
+    url(gstatic) + tools + any               ✘ You need a min balance of 0.4180164 credits to access t  0.49s
+    url(picsum) + tools + any                ✘ You need a min balance of 0.4180164 credits to access t  0.57s
+    image_only + force_tool                  ✘ You need a min balance of 0.4178991 credits to access t  0.50s
+
+  ▶ claude-3-haiku-20240307
+    b64 + params.tools + auto                ★ IMAGE+TOOL ✅  1.44s
+       TOOL: click_element({"element": "Red button", "x": 120, "y": 80})
+    b64 + params.tools + any                 ★ IMAGE+TOOL ✅  1.68s
+       TOOL: click_element({"element": "red button", "x": 120, "y": 80})
+    url(gstatic) + tools + any               ★ IMAGE+TOOL ✅  1.45s
+       TOOL: click_element({"element": "red button", "x": 120, "y": 80})
+    url(picsum) + tools + any                ★ IMAGE+TOOL ✅  1.51s
+       TOOL: click_element({"element": "Red button", "x": 120, "y": 80})
+    image_only + force_tool                  ★ IMAGE+TOOL ✅  1.35s
+       TOOL: click_element({"element": "red_square", "x": 500, "y": 500})
+
+
+════════════════════════════════════════════════════════════════════
+  CONFIRMED WORKING COMBOS — Bytez Claude Image + Tool
+════════════════════════════════════════════════════════════════════
+
+  ✅ YES — Bytez Claude CAN do image + tools in one call!
+
+  Working models: claude-haiku-4-5, claude-sonnet-4-6, claude-3-haiku-20240307
+
+  Best combo (fastest):
+    Model   : claude-haiku-4-5
+    Method  : image_only + force_tool
+    Latency : 1.32s
+    Tool    : click_element({"element": "red square", "x": 16, "y": 16})
+    Text    :
+
+  How to call it in your Desktop agent:
+
+    POST https://api.bytez.com/models/v2/anthropic/{model}
+    Headers:
+      Authorization: Bearer YOUR_BYTEZ_KEY
+      Content-Type: application/json
+
+    Body:
+    {
+      "messages": [
+        {"role":"system","content":"You are a desktop automation agent..."},
+        {"role":"user","content":[
+          {"type":"text","text":"<perception_output>\n<orchestrator_steps>\n<task>"},
+          {"type":"image","base64":"data:image/png;base64,<screenshot_b64>"}
+        ]}
+      ],
+      "params": {
+        "max_tokens": 1024,
+        "tools": [<your_tools_with_input_schema>],
+        "tool_choice": {"type":"auto"}
+      }
+    }
+
+    Response: data["provider"]["content"]  ← tool_use blocks live here
+              data["output"]["content"]    ← text blocks may be here
+
+
+  Update your TypeScript AGENT_MODELS:
+
+    DESKTOP: {
+      provider: 'bytez',
+      model: 'anthropic/claude-haiku-4-5',
+      description: 'Claude vision+tools via Bytez native endpoint. ~1.3s',
+    }
+
+
+C:\Users\thang\Downloads>

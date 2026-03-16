@@ -21,8 +21,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { VirtualDesktopStatus } from "@/components/VirtualDesktopStatusHeader";
-import { PlanningContainer } from "@/components/planner/PlanningContainer";
 import { fetchTaskById } from "@/utils/taskUtils";
+import { AgentHandoffNotification } from "@/components/tasks/AgentHandoffNotification";
+import { useAgentHandoff } from "@/hooks/useAgentHandoff";
+import { SharedStateViewer } from "@/components/tasks/SharedStateViewer";
+import { AgentExecutionHistory } from "@/components/tasks/AgentExecutionHistory";
+import { ClarificationQA } from "@/components/tasks/ClarificationQA";
+import { TaskSummary } from "@/components/tasks/TaskSummary";
 
 export default function TaskPage() {
   const params = useParams();
@@ -40,6 +45,7 @@ export default function TaskPage() {
       setDesktopMode(savedMode);
     }
   }, []);
+  
   const {
     messages,
     groupedMessages,
@@ -51,6 +57,7 @@ export default function TaskPage() {
     isLoadingSession,
     isLoadingMoreMessages,
     hasMoreMessages,
+    toolCalls,
     loadMoreMessages,
     handleAddMessage,
     handleTakeOverTask,
@@ -58,6 +65,38 @@ export default function TaskPage() {
     handleCancelTask,
     currentTaskId,
   } = useChatSession({ initialTaskId: taskId });
+
+  // Track agent handoffs for notifications (must come after taskStatus is defined)
+  const handoffData = useAgentHandoff(taskStatus === TaskStatus.RUNNING ? taskId : null);
+
+  // Check if user is admin (for shared state viewer)
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showClarification, setShowClarification] = useState(false);
+
+  useEffect(() => {
+    // Check for admin flag in localStorage or environment
+    const adminFlag = localStorage.getItem('isAdmin') === 'true' || 
+                      process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
+    setIsAdmin(adminFlag);
+  }, []);
+
+  // Check if we need to show clarification Q&A
+  useEffect(() => {
+    const checkClarification = async () => {
+      if (taskStatus === TaskStatus.PENDING || taskStatus === TaskStatus.RUNNING) {
+        try {
+          const response = await fetch(`/api/proxy/tasks/${taskId}/clarification`);
+          if (response.ok) {
+            const data = await response.json();
+            setShowClarification(data.status === 'pending' && data.questions?.length > 0);
+          }
+        } catch (error) {
+          console.error('Failed to check clarification status:', error);
+        }
+      }
+    };
+    checkClarification();
+  }, [taskId, taskStatus]);
 
   // Fetch task details to check if planning is enabled
   useEffect(() => {
@@ -68,17 +107,25 @@ export default function TaskPage() {
     loadTaskDetails();
   }, [taskId]);
 
-  // Check if task has planning enabled
-  const hasPlan = taskDetails?.planningEnabled === true;
+  // Refresh task details when task status changes (to get updated agentExecutions)
+  useEffect(() => {
+    if (taskStatus === TaskStatus.COMPLETED || taskStatus === TaskStatus.FAILED) {
+      const refreshTaskDetails = async () => {
+        const task = await fetchTaskById(taskId);
+        setTaskDetails(task);
+      };
+      refreshTaskDetails();
+    }
+  }, [taskStatus, taskId]);
 
   // Determine if task is inactive (show screenshot) or active (show VNC)
-  function isTaskInactive(): boolean {
+  const isTaskInactive = React.useCallback((): boolean => {
     return (
       taskStatus === TaskStatus.COMPLETED ||
       taskStatus === TaskStatus.FAILED ||
       taskStatus === TaskStatus.CANCELLED
     );
-  }
+  }, [taskStatus]);
 
   // Determine if user can take control
   function canTakeOver(): boolean {
@@ -119,7 +166,7 @@ export default function TaskPage() {
       loadMoreMessages();
     }
   }, [
-    taskStatus,
+    isTaskInactive,
     hasMoreMessages,
     isLoadingMoreMessages,
     loadMoreMessages,
@@ -145,6 +192,18 @@ export default function TaskPage() {
   return (
     <div className="flex h-screen flex-col">
       <Header />
+
+      {/* Agent Handoff Notifications */}
+      {taskStatus === TaskStatus.RUNNING && handoffData.currentAgent && (
+        <AgentHandoffNotification
+          activeAgent={handoffData.currentAgent}
+          status={handoffData.status}
+          previousAgent={handoffData.previousAgent}
+        />
+      )}
+
+      {/* Shared State Viewer (Admin Only) */}
+      {isAdmin && <SharedStateViewer taskId={taskId} />}
 
       <main className="m-2 flex-1 overflow-hidden px-2 py-4">
         <div className="grid h-full grid-cols-7 gap-4">
@@ -243,20 +302,36 @@ export default function TaskPage() {
 
           {/* Chat and Planning Area */}
           <div className="col-span-3 flex h-full flex-col overflow-hidden">
-            {/* Show planning container if task is pending and has planning */}
-            {hasPlan && taskStatus === TaskStatus.PENDING && taskDetails && (
-              <div className="hide-scrollbar mb-4 max-h-[60vh] overflow-y-auto px-2">
-                <PlanningContainer
+            {/* Show task summary if completed or failed */}
+            {(taskStatus === TaskStatus.COMPLETED || taskStatus === TaskStatus.FAILED) && (
+              <div className="hide-scrollbar mb-4 max-h-[50vh] overflow-y-auto px-4">
+                <TaskSummary taskId={taskId} status={taskStatus} />
+              </div>
+            )}
+
+            {/* Show clarification Q&A if needed */}
+            {showClarification && (
+              <div className="hide-scrollbar mb-4 max-h-[60vh] overflow-y-auto px-4">
+                <ClarificationQA
                   taskId={taskId}
-                  taskDescription={taskDetails.description}
-                  model={taskDetails.model.name}
-                  onPlanApproved={() => {
-                    console.log("Plan approved");
+                  onComplete={() => {
+                    setShowClarification(false);
+                    // Refresh task details
+                    fetchTaskById(taskId).then(setTaskDetails);
                   }}
-                  onPlanCancelled={() => {
-                    router.push("/dashboard");
+                  onSkip={() => {
+                    setShowClarification(false);
+                    // Refresh task details
+                    fetchTaskById(taskId).then(setTaskDetails);
                   }}
                 />
+              </div>
+            )}
+
+            {/* Agent Execution History */}
+            {taskDetails?.agentExecutions && taskDetails.agentExecutions.length > 0 && (
+              <div className="hide-scrollbar mb-4 max-h-[40vh] overflow-y-auto px-4">
+                <AgentExecutionHistory agentExecutions={taskDetails.agentExecutions} />
               </div>
             )}
             
@@ -274,6 +349,7 @@ export default function TaskPage() {
                 isLoading={isLoading}
                 handleAddMessage={handleAddMessage}
                 groupedMessages={groupedMessages}
+                toolCalls={toolCalls}
                 taskStatus={taskStatus}
                 control={control}
                 isLoadingSession={isLoadingSession}

@@ -1,0 +1,60 @@
+---
+title: 'text-to-image'
+description: Generate images using text
+icon: 'image'
+mode: 'wide'
+---
+
+<AccordionGroup>
+	<Accordion defaultOpen="true" title="Basic usage">
+		Generate images using text
+		<CodeGroup>
+			```javascript javascript
+			import Bytez from 'bytez.js';
+			
+			// insert your key
+			const sdk = new Bytez('BYTEZ_KEY');
+			
+			// choose your model
+			const model = sdk.model('dreamlike-art/dreamlike-photoreal-2.0');
+			
+			// provide the model with input
+			const input = "A beautiful landscape with mountains and a river";
+			
+			// send to the model
+			const { error, output } = await model.run(input);
+			
+			// observe the output
+			console.log({ error, output });
+			
+			```
+			```python python
+			from bytez import Bytez
+			
+			# insert your key
+			sdk = Bytez("BYTEZ_KEY")
+			
+			# choose your model
+			model = sdk.model("dreamlike-art/dreamlike-photoreal-2.0")
+			
+			# provide the model with input
+			input = "A beautiful landscape with mountains and a river"
+			
+			# send to the model
+			result = model.run(input)
+			
+			# observe the output
+			print({"error": result.error, "output": result.output})
+			
+			```
+			```bash http
+			curl -X POST 'https://api.bytez.com/models/v2/dreamlike-art/dreamlike-photoreal-2.0' \
+			-H 'Authorization: BYTEZ_KEY' \
+			-H 'Content-Type: application/json' \
+			--data '{
+			  "text": "A beautiful landscape with mountains and a river"
+			}'
+			```
+		</CodeGroup>
+	</Accordion>
+</AccordionGroup>

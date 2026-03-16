@@ -27,7 +27,7 @@ export class ComputerUseController {
         paramsCopy.data = 'base64 data';
       }
       this.logger.log(`Computer action request: ${JSON.stringify(paramsCopy)}`);
-      return await this.computerUseService.action(params);
+      return await this.computerUseService.action(params as any);
     } catch (error) {
       this.logger.error(
         `Error executing computer action: ${error.message}`,

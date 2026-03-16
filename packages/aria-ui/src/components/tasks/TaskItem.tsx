@@ -10,6 +10,9 @@ import {
 } from "@hugeicons/core-free-icons";
 import { Loader } from "@/components/ui/loader";
 import Link from "next/link";
+import { useAgentStatus } from "@/hooks/useAgentStatus";
+import { AgentStatusBadge } from "./AgentStatusBadge";
+import { AgentCostBreakdown } from "./AgentCostBreakdown";
 
 interface TaskItemProps {
   task: Task;
@@ -52,6 +55,8 @@ const STATUS_CONFIGS: Record<TaskStatus, StatusIconConfig> = {
 };
 
 export const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
+  const { agentStatus } = useAgentStatus(task.status === TaskStatus.RUNNING ? task.id : null);
+
   // Format date to match the screenshot (e.g., "Today 9:13am" or "April 13, 2025, 12:01pm")
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -99,11 +104,25 @@ export const TaskItem: React.FC<TaskItemProps> = ({ task }) => {
               {capitalizeFirstChar(task.description)}
             </div>
           </div>
-          <div className="ml-7 flex items-center justify-start space-x-1.5 text-xs">
+          <div className="ml-7 flex items-center justify-start space-x-3 text-xs">
             <span className="text-bytebot-bronze-light-10">
               {formatDate(task.createdAt)}
             </span>
+            {agentStatus && agentStatus.activeAgent && (
+              <AgentStatusBadge
+                activeAgent={agentStatus.activeAgent}
+                status={agentStatus.status}
+              />
+            )}
           </div>
+          {task.agentExecutions && task.agentExecutions.length > 0 && (
+            <div className="ml-7 mt-3">
+              <AgentCostBreakdown
+                agentExecutions={task.agentExecutions}
+                totalCost={task.totalCost}
+              />
+            </div>
+          )}
         </div>
       </div>
     </Link>
