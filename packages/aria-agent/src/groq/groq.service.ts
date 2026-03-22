@@ -20,6 +20,8 @@ import Groq from 'groq-sdk';
 import { v4 as uuid } from 'uuid';
 import { DEFAULT_MODEL } from './groq.constants';
 import { GroqKeyManagerService } from './groq-key-manager.service';
+import { MockLlmService } from '../mock/mock-llm.service';
+
 
 @Injectable()
 export class GroqService implements BytebotAgentService {
@@ -29,6 +31,7 @@ export class GroqService implements BytebotAgentService {
   constructor(
     private readonly configService: ConfigService,
     private readonly keyManager: GroqKeyManagerService,
+    private readonly mockLlmService: MockLlmService,
   ) {
     const totalKeys = this.keyManager.getTotalKeys();
     
@@ -62,6 +65,10 @@ export class GroqService implements BytebotAgentService {
     signal?: AbortSignal,
     customTools?: any[], // Allow passing custom tools
   ): Promise<BytebotAgentResponse> {
+    if (this.mockLlmService.isMockTask(messages)) {
+      return this.mockLlmService.handleMockTask(systemPrompt, messages, model);
+    }
+    
     const maxRetries = this.keyManager.getTotalKeys();
     let lastError: any;
 
@@ -74,6 +81,48 @@ export class GroqService implements BytebotAgentService {
 
         // Use custom tools if provided, otherwise use default groqTools
         const tools = customTools || groqTools;
+
+        // ===== TOKEN COUNTING & TPM LIMIT TRACKING =====
+        const estimatedTokens = this.estimateTokenCount(systemPrompt, groqMessages, tools);
+        const modelLimits = this.getModelLimits(model);
+        
+        this.logger.log(`\n${'='.repeat(80)}`);
+        this.logger.log(`[GROQ API CALL] Model: ${model}`);
+        this.logger.log(`${'='.repeat(80)}`);
+        this.logger.log(`📊 CONTEXT SIZE BREAKDOWN:`);
+        this.logger.log(`   System Prompt: ~${this.estimateTextTokens(systemPrompt)} tokens`);
+        this.logger.log(`   Messages: ${groqMessages.length} messages, ~${this.estimateMessagesTokens(groqMessages)} tokens`);
+        this.logger.log(`   Tools: ${tools.length} tools, ~${this.estimateToolsTokens(tools)} tokens`);
+        this.logger.log(`   TOTAL ESTIMATED: ~${estimatedTokens} tokens`);
+        this.logger.log(`\n📈 MODEL LIMITS:`);
+        this.logger.log(`   Context Window: ${modelLimits.contextWindow.toLocaleString()} tokens`);
+        this.logger.log(`   TPM Limit: ${modelLimits.tpmLimit.toLocaleString()} tokens/minute`);
+        this.logger.log(`   RPM Limit: ${modelLimits.rpmLimit} requests/minute`);
+        
+        const contextUsagePercent = (estimatedTokens / modelLimits.contextWindow) * 100;
+        const tpmUsagePercent = (estimatedTokens / modelLimits.tpmLimit) * 100;
+        
+        this.logger.log(`\n⚠️  USAGE WARNINGS:`);
+        if (estimatedTokens > modelLimits.contextWindow) {
+          this.logger.error(`   ❌ CONTEXT OVERFLOW: ${estimatedTokens} > ${modelLimits.contextWindow} (${contextUsagePercent.toFixed(1)}%)`);
+          this.logger.error(`   This request will FAIL with context length error!`);
+        } else if (contextUsagePercent > 90) {
+          this.logger.warn(`   ⚠️  Context usage: ${contextUsagePercent.toFixed(1)}% (near limit)`);
+        } else {
+          this.logger.log(`   ✅ Context usage: ${contextUsagePercent.toFixed(1)}% (safe)`);
+        }
+        
+        if (estimatedTokens > modelLimits.tpmLimit) {
+          this.logger.error(`   ❌ TPM OVERFLOW: ${estimatedTokens} > ${modelLimits.tpmLimit} (${tpmUsagePercent.toFixed(1)}%)`);
+          this.logger.error(`   This request will FAIL with 413 rate limit error!`);
+          this.logger.error(`   SOLUTION: Truncate workflow descriptions or switch to higher TPM model`);
+        } else if (tpmUsagePercent > 90) {
+          this.logger.warn(`   ⚠️  TPM usage: ${tpmUsagePercent.toFixed(1)}% (near limit)`);
+        } else {
+          this.logger.log(`   ✅ TPM usage: ${tpmUsagePercent.toFixed(1)}% (safe)`);
+        }
+        this.logger.log(`${'='.repeat(80)}\n`);
+        // ===== END TOKEN COUNTING =====
 
         // DEBUG: Log final message structure
         this.logger.debug(`📤 Sending ${groqMessages.length} messages to Groq (model: ${model})`);
@@ -321,5 +370,93 @@ export class GroqService implements BytebotAgentService {
     }
 
     return blocks;
+  }
+
+  /**
+   * Get model limits (context window, TPM, RPM) for a given Groq model
+   * Based on Groq's free tier limits: https://console.groq.com/docs/rate-limits
+   */
+  private getModelLimits(model: string): { contextWindow: number; tpmLimit: number; rpmLimit: number } {
+    // Groq free tier TPM limits (as of 2024)
+    const limits: Record<string, { contextWindow: number; tpmLimit: number; rpmLimit: number }> = {
+      // Llama models
+      'meta-llama/llama-4-scout': { contextWindow: 128000, tpmLimit: 15000, rpmLimit: 30 },
+      'meta-llama/llama-4-maverick': { contextWindow: 128000, tpmLimit: 15000, rpmLimit: 30 },
+      'meta-llama/llama-3.3-70b-versatile': { contextWindow: 128000, tpmLimit: 15000, rpmLimit: 30 },
+      'meta-llama/llama-3.1-70b-versatile': { contextWindow: 128000, tpmLimit: 15000, rpmLimit: 30 },
+      'meta-llama/llama-3.1-8b-instant': { contextWindow: 128000, tpmLimit: 20000, rpmLimit: 30 },
+      
+      // OpenAI-compatible models on Groq
+      'openai/gpt-oss-120b': { contextWindow: 32768, tpmLimit: 8000, rpmLimit: 30 },
+      'openai/gpt-oss-20b': { contextWindow: 32768, tpmLimit: 15000, rpmLimit: 30 },
+      
+      // Mixtral models
+      'mistralai/mixtral-8x7b-32768': { contextWindow: 32768, tpmLimit: 15000, rpmLimit: 30 },
+      
+      // Gemma models
+      'google/gemma-7b-it': { contextWindow: 8192, tpmLimit: 15000, rpmLimit: 30 },
+      'google/gemma2-9b-it': { contextWindow: 8192, tpmLimit: 15000, rpmLimit: 30 },
+    };
+
+    // Return specific limits or default conservative limits
+    return limits[model] || { contextWindow: 32768, tpmLimit: 8000, rpmLimit: 30 };
+  }
+
+  /**
+   * Estimate token count for text using rough approximation (1 token ≈ 4 characters)
+   */
+  private estimateTextTokens(text: string): number {
+    return Math.ceil(text.length / 4);
+  }
+
+  /**
+   * Estimate token count for messages array
+   */
+  private estimateMessagesTokens(messages: any[]): number {
+    let total = 0;
+    for (const msg of messages) {
+      if (typeof msg.content === 'string') {
+        total += this.estimateTextTokens(msg.content);
+      } else if (Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (part.type === 'text') {
+            total += this.estimateTextTokens(part.text);
+          } else if (part.type === 'image_url') {
+            // Images typically cost ~85-170 tokens depending on size
+            total += 150; // Conservative estimate
+          }
+        }
+      }
+      
+      // Tool calls add overhead
+      if (msg.tool_calls) {
+        for (const toolCall of msg.tool_calls) {
+          total += this.estimateTextTokens(JSON.stringify(toolCall));
+        }
+      }
+    }
+    return total;
+  }
+
+  /**
+   * Estimate token count for tools definitions
+   */
+  private estimateToolsTokens(tools: any[]): number {
+    const toolsJson = JSON.stringify(tools);
+    return this.estimateTextTokens(toolsJson);
+  }
+
+  /**
+   * Estimate total token count for entire request
+   */
+  private estimateTokenCount(systemPrompt: string, messages: any[], tools: any[]): number {
+    const systemTokens = this.estimateTextTokens(systemPrompt);
+    const messageTokens = this.estimateMessagesTokens(messages);
+    const toolTokens = this.estimateToolsTokens(tools);
+    
+    // Add overhead for message formatting (~10% overhead)
+    const overhead = Math.ceil((systemTokens + messageTokens + toolTokens) * 0.1);
+    
+    return systemTokens + messageTokens + toolTokens + overhead;
   }
 }

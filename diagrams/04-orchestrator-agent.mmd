@@ -1,0 +1,97 @@
+graph TB
+    subgraph "📋 PHASE 2: PLANNING"
+        A[📥 INPUT<br/>ClarifiedTask from CLARIFIER<br/>clarified_goal, task_type, constraints]
+        
+        B[🤖 ORCHESTRATOR AGENT<br/>Model: anthropic/claude-opus-4.6<br/>Provider: Bytez<br/>Runs: 2-3x per task<br/>User-selectable model]
+        
+        C{📋 CONTEXT SOURCES}
+        C1[📄 System Prompt<br/>1261 lines<br/>Planning rules<br/>Workflow integration<br/>Step granularity]
+        C2[🎯 Clarified Goal<br/>From shared state<br/>task:taskId:task_goal]
+        C3[📦 Available Workflows<br/>Via tool calls<br/>list_workflows<br/>read_workflow]
+        
+        D{🔧 TOOLS AVAILABLE}
+        D1[🔍 list_workflows<br/>Returns all workflows<br/>name, description, variables]
+        D2[📖 read_workflow<br/>Get workflow metadata<br/>timeout, required vars]
+        D3[✅ use_workflow<br/>Include in plan<br/>workflow_name, variables]
+        
+        E[🔄 LLM CALL 1<br/>Workflow Discovery<br/>Bytez API<br/>Tools enabled]
+        
+        F[📞 Tool Execution<br/>WorkflowService<br/>List/Read workflows]
+        
+        G[🔄 LLM CALL 2<br/>Final Planning<br/>With tool results<br/>JSON output]
+        
+        H{🎯 OUTPUT SCHEMA}
+        H1[steps: ExecutionStep array]
+        H2[estimated_duration_minutes: number]
+        H3[complexity: simple/moderate/complex]
+        
+        I{📝 ExecutionStep Schema}
+        I1[id: step_1, step_2...]
+        I2[type: web/desktop/workflow]
+        I3[description: what to do]
+        I4[success_criteria: how to verify]
+        I5[context: extra info]
+        I6[depends_on: prerequisite steps]
+        I7[workflow_name: if type=workflow]
+        I8[workflow_vars: if type=workflow]
+        
+        J[🔴 Redis State Update<br/>task:taskId:execution_plan<br/>Store complete plan]
+        
+        K[⚡ WebSocket Event<br/>agent_status<br/>activeAgent: ORCHESTRATOR<br/>status: planning]
+        
+        L[📊 Frontend Display<br/>'Creating execution plan...'<br/>AgentStatusBadge shows ORCHESTRATOR]
+        
+        M[💰 Cost Tracking<br/>Tokens: ~3000<br/>Cost: $0.135<br/>Duration: ~15 seconds]
+        
+        N[✅ VALIDATION<br/>steps.length > 0<br/>Each step has type<br/>Success criteria defined]
+    end
+    
+    A --> B
+    B --> C
+    C --> C1 & C2 & C3
+    C --> D
+    D --> D1 & D2 & D3
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+    H --> H1 & H2 & H3
+    H1 --> I
+    I --> I1 & I2 & I3 & I4 & I5 & I6 & I7 & I8
+    I --> N
+    N --> J
+    J --> K
+    K --> L
+    B --> M
+    
+    style A fill:#FFE6CC,stroke:#D79B00,stroke-width:3px
+    style B fill:#D5E8D4,stroke:#82B366,stroke-width:4px
+    style C fill:#E1F5FE,stroke:#0277BD,stroke-width:2px
+    style C1 fill:#B3E5FC,stroke:#0288D1,stroke-width:2px
+    style C2 fill:#B3E5FC,stroke:#0288D1,stroke-width:2px
+    style C3 fill:#B3E5FC,stroke:#0288D1,stroke-width:2px
+    style D fill:#FFF9C4,stroke:#F9A825,stroke-width:2px
+    style D1 fill:#FFECB3,stroke:#FFA000,stroke-width:2px
+    style D2 fill:#FFECB3,stroke:#FFA000,stroke-width:2px
+    style D3 fill:#FFECB3,stroke:#FFA000,stroke-width:2px
+    style E fill:#C8E6C9,stroke:#388E3C,stroke-width:3px
+    style F fill:#A5D6A7,stroke:#2E7D32,stroke-width:2px
+    style G fill:#C8E6C9,stroke:#388E3C,stroke-width:3px
+    style H fill:#FFF9C4,stroke:#F9A825,stroke-width:2px
+    style H1 fill:#FFECB3,stroke:#FFA000,stroke-width:1px
+    style H2 fill:#FFECB3,stroke:#FFA000,stroke-width:1px
+    style H3 fill:#FFECB3,stroke:#FFA000,stroke-width:1px
+    style I fill:#E1BEE7,stroke:#6A1B9A,stroke-width:2px
+    style I1 fill:#CE93D8,stroke:#7B1FA2,stroke-width:1px
+    style I2 fill:#CE93D8,stroke:#7B1FA2,stroke-width:1px
+    style I3 fill:#CE93D8,stroke:#7B1FA2,stroke-width:1px
+    style I4 fill:#CE93D8,stroke:#7B1FA2,stroke-width:1px
+    style I5 fill:#CE93D8,stroke:#7B1FA2,stroke-width:1px
+    style I6 fill:#CE93D8,stroke:#7B1FA2,stroke-width:1px
+    style I7 fill:#CE93D8,stroke:#7B1FA2,stroke-width:1px
+    style I8 fill:#CE93D8,stroke:#7B1FA2,stroke-width:1px
+    style J fill:#FFCDD2,stroke:#C62828,stroke-width:2px
+    style K fill:#E1BEE7,stroke:#6A1B9A,stroke-width:2px
+    style L fill:#B2DFDB,stroke:#00695C,stroke-width:2px
+    style M fill:#F0F4C3,stroke:#9E9D24,stroke-width:2px
+    style N fill:#C8E6C9,stroke:#388E3C,stroke-width:2px

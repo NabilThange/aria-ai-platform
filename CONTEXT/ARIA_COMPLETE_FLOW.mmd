@@ -1,0 +1,453 @@
+graph TB
+    %% ============================================================================
+    %% ARIA MULTI-AGENT SYSTEM - COMPLETE ARCHITECTURE FLOW
+    %% Single unified diagram showing the entire orchestration pipeline
+    %% ============================================================================
+    
+    %% USER INPUT & TASK CREATION
+    USER[👤 USER<br/>Submits Task<br/>from Dashboard]
+    API[🚪 API ENDPOINT<br/>POST /tasks<br/>Creates Task Record]
+    DB[(💾 PostgreSQL<br/>Tasks, Messages, Files<br/>Status: PENDING)]
+    REDIS[(🔴 Redis<br/>Shared State<br/>task:taskId:*)]
+    WS[⚡ WebSocket<br/>Real-time Updates<br/>Socket.IO]
+    
+    %% ORCHESTRATION PIPELINE START
+    ORCH_START[🎭 ORCHESTRATION<br/>PIPELINE STARTS<br/>Sequential Execution]
+    
+    %% ============================================================================
+    %% PHASE 1: CLARIFICATION
+    %% ============================================================================
+    
+    subgraph PHASE1["🔍 PHASE 1: CLARIFICATION"]
+        CL_INPUT[📥 INPUT<br/>Raw user task description<br/>'Search Google for Python courses']
+        
+        CL_AGENT[🤖 CLARIFIER AGENT<br/>Model: openai/gpt-oss-20b<br/>Provider: Groq<br/>Runs: 1x per task]
+        
+        CL_CONTEXT[📋 CONTEXT SOURCES<br/>- System prompt: clarification rules<br/>- User input: raw task description<br/>- No previous context]
+        
+        CL_LLM[🔧 LLM CALL<br/>Groq API<br/>No tools<br/>JSON output mode]
+        
+        CL_OUTPUT[🎯 OUTPUT SCHEMA<br/>original_input: string<br/>clarified_goal: string<br/>constraints: string array<br/>assumptions: string array<br/>task_type: web/desktop/mixed<br/>questions_asked: 0 or 1]
+        
+        CL_DECISION{❓ DECISION POINT<br/>questions_asked > 0?}
+        
+        CL_PAUSE[⏸️ PAUSE TASK<br/>Status: NEEDS_HELP<br/>Store question in Redis<br/>Emit WebSocket event]
+        
+        CL_PROCEED[▶️ PROCEED<br/>Save to Redis<br/>task:taskId:task_goal<br/>Continue to ORCHESTRATOR]
+        
+        CL_COST[💰 COST<br/>Tokens: ~500<br/>Cost: $0.00005<br/>Duration: ~2s]
+    end
+    
+    %% ============================================================================
+    %% PHASE 2: PLANNING
+    %% ============================================================================
+    
+    subgraph PHASE2["📋 PHASE 2: PLANNING"]
+        OR_INPUT[📥 INPUT<br/>ClarifiedTask from CLARIFIER<br/>clarified_goal, task_type, constraints]
+        
+        OR_AGENT[🤖 ORCHESTRATOR AGENT<br/>Model: anthropic/claude-opus-4.6<br/>Provider: Bytez<br/>User-selectable model]
+        
+        OR_CONTEXT[📋 CONTEXT SOURCES<br/>- System prompt: 1261 lines<br/>- Clarified goal from shared state<br/>- Available workflows via tools<br/>- Planning instructions]
+        
+        OR_TOOLS[🔧 TOOLS AVAILABLE<br/>list_workflows: Get all workflows<br/>read_workflow: Get workflow details<br/>use_workflow: Include in plan]
+        
+        OR_LLM1[🔄 LLM CALL 1<br/>Workflow Discovery<br/>Bytez API<br/>Tools enabled]
+        
+        OR_WORKFLOW[📦 WorkflowService<br/>List/Read workflows<br/>google-search<br/>take-screenshot]
+        
+        OR_LLM2[🔄 LLM CALL 2<br/>Final Planning<br/>With tool results<br/>JSON output]
+        
+        OR_OUTPUT[🎯 OUTPUT SCHEMA<br/>steps: ExecutionStep array<br/>estimated_duration_minutes: number<br/>complexity: simple/moderate/complex<br/><br/>ExecutionStep:<br/>- id: step_1, step_2...<br/>- type: web/desktop/workflow<br/>- description: what to do<br/>- success_criteria: how to verify<br/>- context: extra info<br/>- depends_on: prerequisite steps]
+        
+        OR_VALIDATE[✅ VALIDATION<br/>steps.length > 0<br/>Each step has type<br/>Success criteria defined]
+        
+        OR_COST[💰 COST<br/>Tokens: ~3000<br/>Cost: $0.135<br/>Duration: ~15s]
+    end
+    
+    %% ============================================================================
+    %% PHASE 3: EXECUTION (Multi-Agent)
+    %% ============================================================================
+    
+    EXEC_LOOP[🔄 EXECUTION LOOP<br/>For each step in plan<br/>Sequential execution]
+    
+    STEP_ROUTER{🎯 STEP TYPE<br/>ROUTER}
+    
+    %% ============================================================================
+    %% PHASE 3A: DESKTOP AGENT
+    %% ============================================================================
+    
+    subgraph PHASE3A["🖥️ PHASE 3A: DESKTOP AGENT"]
+        DA_INPUT[📥 INPUT<br/>ExecutionStep<br/>type: desktop<br/>description, success_criteria]
+        
+        DA_AGENT[🤖 DESKTOP AGENT<br/>Model: anthropic/claude-sonnet-4.6<br/>Provider: Bytez<br/>Max 20 iterations]
+        
+        DA_CONTEXT[📋 CONTEXT SOURCES<br/>- System prompt: desktop control<br/>- Execution plan step<br/>- Action history<br/>- Screenshot + PERCEPTION<br/>- Recovery strategy if escalated]
+        
+        DA_ITER[🔄 ITERATION LOOP<br/>Max 20 iterations<br/>Budget per step: ~5]
+        
+        DA_SCREENSHOT[📸 Take Screenshot<br/>VNC localhost:9990<br/>Base64 image]
+        
+        DA_PERCEPTION[👁️ PERCEPTION AGENT<br/>Analyze screenshot<br/>Extract UI state<br/>Find clickable elements]
+        
+        DA_LLM[🔧 LLM CALL<br/>Bytez API<br/>Tools enabled<br/>Screenshot attached]
+        
+        DA_TOOLS[🎯 TOOLS AVAILABLE<br/>computer action: click x,y<br/>computer action: type text<br/>computer action: paste text FAST<br/>computer action: key Return/ctrl+c<br/>computer action: scroll direction<br/>computer action: screenshot<br/>computer action: application chromium/terminal<br/>computer action: terminal_command<br/>set_task_status: completed/failed]
+        
+        DA_EXECUTE[⚙️ Execute Tool Call<br/>VNC API<br/>Perform action<br/>Wait 1s to settle]
+        
+        DA_CHECK{🔍 Check Success<br/>Criteria met?}
+        
+        DA_COMPLETE[✅ Step Complete<br/>Exit iteration loop]
+        
+        DA_CONTINUE[🔄 Continue Loop<br/>Next iteration]
+        
+        DA_MAX[⚠️ Max Iterations<br/>Force completion<br/>or escalate]
+        
+        DA_COST[💰 COST<br/>Tokens: ~2500/iteration<br/>Cost: ~$0.0225/iteration<br/>PERCEPTION: +tokens]
+    end
+    
+    %% ============================================================================
+    %% PHASE 3B: WEB AGENT
+    %% ============================================================================
+    
+    subgraph PHASE3B["🌐 PHASE 3B: WEB AGENT"]
+        WA_INPUT[📥 INPUT<br/>ExecutionStep<br/>type: web<br/>description, success_criteria]
+        
+        WA_AGENT[🤖 WEB AGENT<br/>Model: gemini-3-flash-preview<br/>Provider: Google<br/>Max 20 iterations]
+        
+        WA_EAGER[🚀 EAGER INITIALIZATION<br/>Browser launched immediately<br/>Instance metadata ready<br/>Prevents duplicate launches]
+        
+        WA_CONTEXT[📋 CONTEXT SOURCES<br/>- System prompt: PinchTab instructions<br/>- Execution plan step<br/>- Action history<br/>- Page snapshot with refs<br/>- PERCEPTION every 2 iterations<br/>- Browser metadata]
+        
+        WA_ITER[🔄 ITERATION LOOP<br/>Max 20 iterations<br/>Budget per step: ~5]
+        
+        WA_SNAPSHOT[📸 Get Page Snapshot<br/>PinchTab API<br/>localhost:9867<br/>Interactive elements with refs]
+        
+        WA_PERCEPTION[👁️ PERCEPTION AGENT<br/>Every 2 iterations<br/>Analyze page state<br/>Extract UI info]
+        
+        WA_AUTO[✅ Auto-Completion Check<br/>Evaluate success criteria<br/>Against snapshot<br/>60% term match]
+        
+        WA_LLM[🔧 LLM CALL<br/>Google Gemini API<br/>Tools enabled<br/>Snapshot data]
+        
+        WA_TOOLS[🎯 TOOLS AVAILABLE<br/>pinchtab_navigate: url<br/>pinchtab_get_snapshot<br/>pinchtab_click: ref<br/>pinchtab_type: ref, text<br/>pinchtab_press: key<br/>pinchtab_wait: ms max 5000<br/>pinchtab_scroll: direction<br/>pinchtab_mark_complete: message]
+        
+        WA_EXECUTE[⚙️ Execute Tool Call<br/>PinchTab API<br/>Perform action<br/>Wait 1s to settle]
+        
+        WA_CHECK{🔍 Check Success<br/>Criteria met?}
+        
+        WA_COMPLETE[✅ Step Complete<br/>Exit loop]
+        
+        WA_CONTINUE[🔄 Continue Loop<br/>Next iteration]
+        
+        WA_MAX[⚠️ Max Iterations<br/>Force completion]
+        
+        WA_COST[💰 COST<br/>Tokens: ~1800/iteration<br/>Cost: ~$0.0018/iteration<br/>PERCEPTION: +tokens]
+    end
+    
+    %% ============================================================================
+    %% PHASE 3C: WORKFLOW EXECUTION
+    %% ============================================================================
+    
+    subgraph PHASE3C["📦 PHASE 3C: WORKFLOW"]
+        WF_INPUT[📥 INPUT<br/>ExecutionStep<br/>type: workflow<br/>workflow_name, workflow_vars]
+        
+        WF_SERVICE[🔧 WORKFLOW SERVICE<br/>Not an LLM agent<br/>Pre-built automation<br/>Deterministic execution]
+        
+        WF_LOAD[📂 Load Workflow<br/>From workflows/ directory<br/>google-search.workflow.ts<br/>take-screenshot.workflow.ts]
+        
+        WF_META[📋 WORKFLOW METADATA<br/>name: string<br/>description: string<br/>version: string<br/>timeout_ms: 30000<br/>variables: array required]
+        
+        WF_VALIDATE[✅ Validate Variables<br/>Check required vars<br/>Type validation<br/>Schema match]
+        
+        WF_SERVICES[🛠️ SERVICES AVAILABLE<br/>PinchTab Service: browser automation<br/>Desktop Service: future VNC control]
+        
+        WF_EXECUTE[⏱️ Execute with Timeout<br/>Race condition<br/>Workflow vs timeout<br/>Max 30s default]
+        
+        WF_STEPS[🔄 WORKFLOW STEPS<br/>Sequential execution<br/>Each step uses services<br/>No LLM calls<br/><br/>Example google-search:<br/>1. Navigate to Google<br/>2. Get snapshot find search box<br/>3. Click search box<br/>4. Type query<br/>5. Press Enter<br/>6. Wait for results<br/>7. Extract top 10 headings]
+        
+        WF_OUTPUT[🎯 WORKFLOW OUTPUT<br/>success: boolean<br/>message: string<br/>data: object workflow-specific<br/>error: string if failed]
+        
+        WF_COST[💰 COST<br/>Tokens: 0<br/>Cost: $0<br/>No LLM calls<br/>Pure automation<br/>Duration: 10-30s]
+    end
+    
+    %% ============================================================================
+    %% PHASE 3.5: VERIFICATION
+    %% ============================================================================
+    
+    subgraph PHASE35["✅ PHASE 3.5: VERIFICATION"]
+        VE_INPUT[📥 INPUT<br/>Action Result<br/>from WEB/DESKTOP agent<br/>action, details, screenshot]
+        
+        VE_AGENT[🤖 VERIFIER AGENT<br/>Model: openai/gpt-oss-20b<br/>Provider: Groq<br/>Runs: 20-30x per task<br/>Strict JSON mode]
+        
+        VE_CONTEXT[📋 CONTEXT SOURCES<br/>- System prompt: verification rules<br/>- Step success criteria<br/>- Action result<br/>- Screenshot if available]
+        
+        VE_LLM[🔧 LLM CALL<br/>Groq API<br/>Strict JSON mode<br/>No tools<br/>Fast response]
+        
+        VE_OUTPUT[🎯 OUTPUT SCHEMA<br/>action_succeeded: boolean<br/>screen_changed: boolean<br/>error_detected: boolean<br/>error_message: string<br/>retry_recommended: boolean<br/>confidence: 0.0 to 1.0]
+        
+        VE_DECISION{❓ DECISION POINT<br/>action_succeeded?}
+        
+        VE_SUCCESS[✅ SUCCESS<br/>Proceed to next step<br/>Continue execution]
+        
+        VE_FAILURE[❌ FAILURE<br/>Enter escalation ladder<br/>L1 → L2 → L3 → L4]
+        
+        VE_COST[💰 COST<br/>Tokens: ~200/verification<br/>Cost: ~$0.00002<br/>Duration: ~1s<br/>Very cheap and fast]
+    end
+    
+    %% ============================================================================
+    %% ESCALATION STRATEGY
+    %% ============================================================================
+    
+    subgraph ESCALATION["🔄 ESCALATION LADDER"]
+        ESC_START[❌ VERIFIER REPORTS FAILURE<br/>action_succeeded = false<br/>Step did not complete]
+        
+        ESC_COUNTER{📊 ATTEMPT COUNTER}
+        
+        ESC_L1[🔄 LEVEL 1: RETRY<br/>Attempt 1<br/>Same step, different approach<br/>Agent tries again<br/>No external help]
+        
+        ESC_L2[🔧 LEVEL 2: RECOVERY AGENT<br/>Attempt 2<br/>Call RECOVERY agent<br/>Generate alternative strategy<br/>Agent uses new approach]
+        
+        ESC_L3[📋 LEVEL 3: REPLAN<br/>Attempt 3<br/>Call ORCHESTRATOR<br/>Replan entire task<br/>New execution plan]
+        
+        ESC_L4[💥 LEVEL 4: TASK FAILURE<br/>Attempt 4<br/>Task fails<br/>User notified<br/>Status: FAILED]
+        
+        REC_AGENT[🤖 RECOVERY AGENT<br/>Model: anthropic/claude-sonnet-4.6<br/>Provider: Bytez<br/>Creative problem-solving]
+        
+        REC_CONTEXT[📋 RECOVERY CONTEXT<br/>- System prompt: recovery strategies<br/>- Failure log: what failed<br/>- Action history: what worked<br/>- Previous strategies: avoid repeating]
+        
+        REC_OUTPUT[🎯 RECOVERY OUTPUT<br/>strategy: string main approach<br/>avoid: string array don't do these<br/>approach: string how to execute<br/>alternatives: array backup strategies]
+        
+        REC_RETRY[🔄 RETRY WITH STRATEGY<br/>Agent executes step again<br/>Using recovery approach<br/>Avoiding failed methods]
+        
+        REC_CHECK{✅ SUCCESS?}
+        
+        REC_CONTINUE[✅ CONTINUE<br/>Step completed<br/>Move to next step<br/>Clear recovery state]
+        
+        REC_ESCALATE[❌ STILL FAILED<br/>Escalate to next level<br/>L2 → L3 → L4]
+        
+        ESC_COST[💰 COST<br/>RECOVERY: ~2000 tokens<br/>Cost: ~$0.018<br/>REPLAN: ~3000 tokens<br/>Cost: ~$0.135]
+    end
+    
+    %% ============================================================================
+    %% PHASE 4: REPORTING
+    %% ============================================================================
+    
+    subgraph PHASE4["📝 PHASE 4: REPORTING"]
+        REP_INPUT[📥 INPUT<br/>Complete Task State<br/>All steps completed<br/>Full execution history]
+        
+        REP_AGENT[🤖 REPORTER AGENT<br/>Model: openai/gpt-oss-20b<br/>Provider: Groq<br/>Runs: 1x per task<br/>Zero reasoning needed]
+        
+        REP_CONTEXT[📋 CONTEXT SOURCES<br/>- System prompt: reporting format<br/>- Task goal: original clarified goal<br/>- Execution plan: all steps<br/>- Action history: complete log<br/>- Failure log: if any failures<br/>- Cost tracking: per-agent costs<br/>- All messages: from database]
+        
+        REP_LLM[🔧 LLM CALL<br/>Groq API<br/>No tools<br/>JSON output<br/>Fast summary]
+        
+        REP_OUTPUT[🎯 OUTPUT SCHEMA<br/>summary: string plain language<br/>steps_completed: number<br/>results: object task-specific data<br/>recommendations: array suggestions<br/>total_cost: string dollar amount<br/>total_tokens: number all agents<br/>duration_seconds: number total time]
+        
+        REP_SAVE[💾 Save to Database<br/>Task status: COMPLETED<br/>Save final report<br/>Archive task]
+        
+        REP_COST[💰 COST<br/>Tokens: ~800<br/>Cost: ~$0.00008<br/>Duration: ~3s<br/>Very cheap]
+    end
+    
+    %% ============================================================================
+    %% EXTERNAL SERVICES
+    %% ============================================================================
+    
+    PINCHTAB[🌐 PinchTab<br/>localhost:9867<br/>Browser Automation<br/>Chromium Instance]
+    
+    VNC[🖥️ VNC Desktop<br/>localhost:9990<br/>Ubuntu 22.04<br/>Desktop Environment]
+    
+    %% ============================================================================
+    %% SHARED STATE & WEBSOCKET
+    %% ============================================================================
+    
+    STATE_UPDATE[🔴 Redis State Update<br/>task:taskId:task_goal<br/>task:taskId:execution_plan<br/>task:taskId:action_history<br/>task:taskId:failure_log<br/>task:taskId:recovery_strategy<br/>task:taskId:cost_tracking<br/>task:taskId:status]
+    
+    WS_EMIT[⚡ WebSocket Events<br/>agent_status: activeAgent, status<br/>task_updated: task object<br/>new_message: message object<br/>agent_activity: screenshots, actions<br/>browser_log: detailed execution]
+    
+    FRONTEND[📊 FRONTEND DISPLAY<br/>React Components<br/>TasksPage, AgentStatus<br/>Real-time updates<br/>VNC stream visible<br/>Activity feed<br/>Cost breakdown]
+    
+    %% ============================================================================
+    %% MAIN FLOW CONNECTIONS
+    %% ============================================================================
+    
+    USER --> API
+    API --> DB
+    API --> REDIS
+    API --> WS
+    API --> ORCH_START
+    
+    ORCH_START --> PHASE1
+    CL_INPUT --> CL_AGENT
+    CL_AGENT --> CL_CONTEXT
+    CL_CONTEXT --> CL_LLM
+    CL_LLM --> CL_OUTPUT
+    CL_OUTPUT --> CL_DECISION
+    CL_DECISION -->|Yes| CL_PAUSE
+    CL_DECISION -->|No| CL_PROCEED
+    CL_PROCEED --> PHASE2
+    CL_AGENT -.-> CL_COST
+    
+    OR_INPUT --> OR_AGENT
+    OR_AGENT --> OR_CONTEXT
+    OR_CONTEXT --> OR_TOOLS
+    OR_TOOLS --> OR_LLM1
+    OR_LLM1 --> OR_WORKFLOW
+    OR_WORKFLOW --> OR_LLM2
+    OR_LLM2 --> OR_OUTPUT
+    OR_OUTPUT --> OR_VALIDATE
+    OR_VALIDATE --> EXEC_LOOP
+    OR_AGENT -.-> OR_COST
+    
+    EXEC_LOOP --> STEP_ROUTER
+    STEP_ROUTER -->|desktop| PHASE3A
+    STEP_ROUTER -->|web| PHASE3B
+    STEP_ROUTER -->|workflow| PHASE3C
+    
+    DA_INPUT --> DA_AGENT
+    DA_AGENT --> DA_CONTEXT
+    DA_CONTEXT --> DA_ITER
+    DA_ITER --> DA_SCREENSHOT
+    DA_SCREENSHOT --> DA_PERCEPTION
+    DA_PERCEPTION --> DA_LLM
+    DA_LLM --> DA_TOOLS
+    DA_TOOLS --> DA_EXECUTE
+    DA_EXECUTE --> DA_CHECK
+    DA_CHECK -->|Yes| DA_COMPLETE
+    DA_CHECK -->|No| DA_CONTINUE
+    DA_CONTINUE --> DA_ITER
+    DA_ITER -.->|>20| DA_MAX
+    DA_AGENT -.-> DA_COST
+    DA_AGENT --> VNC
+    
+    WA_INPUT --> WA_AGENT
+    WA_AGENT --> WA_EAGER
+    WA_EAGER --> WA_CONTEXT
+    WA_CONTEXT --> WA_ITER
+    WA_ITER --> WA_SNAPSHOT
+    WA_SNAPSHOT --> WA_PERCEPTION
+    WA_PERCEPTION --> WA_AUTO
+    WA_AUTO --> WA_LLM
+    WA_LLM --> WA_TOOLS
+    WA_TOOLS --> WA_EXECUTE
+    WA_EXECUTE --> WA_CHECK
+    WA_CHECK -->|Yes| WA_COMPLETE
+    WA_CHECK -->|No| WA_CONTINUE
+    WA_CONTINUE --> WA_ITER
+    WA_ITER -.->|>20| WA_MAX
+    WA_AGENT -.-> WA_COST
+    WA_AGENT --> PINCHTAB
+    
+    WF_INPUT --> WF_SERVICE
+    WF_SERVICE --> WF_LOAD
+    WF_LOAD --> WF_META
+    WF_META --> WF_VALIDATE
+    WF_VALIDATE --> WF_SERVICES
+    WF_SERVICES --> WF_EXECUTE
+    WF_EXECUTE --> WF_STEPS
+    WF_STEPS --> WF_OUTPUT
+    WF_SERVICE -.-> WF_COST
+    WF_SERVICE --> PINCHTAB
+    
+    DA_COMPLETE --> PHASE35
+    WA_COMPLETE --> PHASE35
+    WF_OUTPUT --> PHASE35
+    
+    VE_INPUT --> VE_AGENT
+    VE_AGENT --> VE_CONTEXT
+    VE_CONTEXT --> VE_LLM
+    VE_LLM --> VE_OUTPUT
+    VE_OUTPUT --> VE_DECISION
+    VE_DECISION -->|Yes| VE_SUCCESS
+    VE_DECISION -->|No| VE_FAILURE
+    VE_AGENT -.-> VE_COST
+    
+    VE_SUCCESS --> EXEC_LOOP
+    VE_FAILURE --> ESCALATION
+    
+    ESC_START --> ESC_COUNTER
+    ESC_COUNTER -->|Attempt 1| ESC_L1
+    ESC_COUNTER -->|Attempt 2| ESC_L2
+    ESC_COUNTER -->|Attempt 3| ESC_L3
+    ESC_COUNTER -->|Attempt 4| ESC_L4
+    
+    ESC_L2 --> REC_AGENT
+    REC_AGENT --> REC_CONTEXT
+    REC_CONTEXT --> REC_OUTPUT
+    REC_OUTPUT --> REC_RETRY
+    REC_RETRY --> REC_CHECK
+    REC_CHECK -->|Yes| REC_CONTINUE
+    REC_CHECK -->|No| REC_ESCALATE
+    REC_CONTINUE --> EXEC_LOOP
+    REC_ESCALATE --> ESC_COUNTER
+    ESC_L1 --> STEP_ROUTER
+    REC_AGENT -.-> ESC_COST
+    
+    EXEC_LOOP -.->|All steps done| PHASE4
+    
+    REP_INPUT --> REP_AGENT
+    REP_AGENT --> REP_CONTEXT
+    REP_CONTEXT --> REP_LLM
+    REP_LLM --> REP_OUTPUT
+    REP_OUTPUT --> REP_SAVE
+    REP_AGENT -.-> REP_COST
+    
+    %% State and WebSocket connections
+    CL_PROCEED --> STATE_UPDATE
+    OR_VALIDATE --> STATE_UPDATE
+    DA_EXECUTE --> STATE_UPDATE
+    WA_EXECUTE --> STATE_UPDATE
+    WF_OUTPUT --> STATE_UPDATE
+    VE_OUTPUT --> STATE_UPDATE
+    REC_OUTPUT --> STATE_UPDATE
+    REP_SAVE --> STATE_UPDATE
+    
+    STATE_UPDATE --> REDIS
+    STATE_UPDATE --> WS_EMIT
+    WS_EMIT --> WS
+    WS --> FRONTEND
+    FRONTEND --> USER
+    
+    REP_SAVE --> DB
+    
+    %% ============================================================================
+    %% STYLING
+    %% ============================================================================
+    
+    classDef userStyle fill:#FFE6CC,stroke:#D79B00,stroke-width:3px
+    classDef apiStyle fill:#E1F5FE,stroke:#0277BD,stroke-width:2px
+    classDef dbStyle fill:#F5F5F5,stroke:#666666,stroke-width:2px
+    classDef redisStyle fill:#FFCDD2,stroke:#C62828,stroke-width:2px
+    classDef wsStyle fill:#E1BEE7,stroke:#6A1B9A,stroke-width:2px
+    classDef orchStyle fill:#FFB3BA,stroke:#D79B00,stroke-width:3px
+    classDef clarifierStyle fill:#FFF2CC,stroke:#D6B656,stroke-width:2px
+    classDef orchestratorStyle fill:#D5E8D4,stroke:#82B366,stroke-width:2px
+    classDef desktopStyle fill:#F8CECC,stroke:#B85450,stroke-width:2px
+    classDef webStyle fill:#DAE8FC,stroke:#6C8EBF,stroke-width:2px
+    classDef workflowStyle fill:#E1D5E7,stroke:#9673A6,stroke-width:2px
+    classDef verifierStyle fill:#FFF2CC,stroke:#D6B656,stroke-width:2px
+    classDef recoveryStyle fill:#FFE6CC,stroke:#D79B00,stroke-width:2px
+    classDef reporterStyle fill:#D5E8D4,stroke:#82B366,stroke-width:2px
+    classDef externalStyle fill:#CCE5FF,stroke:#0066CC,stroke-width:2px
+    classDef frontendStyle fill:#B2DFDB,stroke:#00695C,stroke-width:2px
+    classDef costStyle fill:#F0F4C3,stroke:#9E9D24,stroke-width:1px
+    classDef decisionStyle fill:#CE93D8,stroke:#7B1FA2,stroke-width:2px
+    classDef inputStyle fill:#FFECB3,stroke:#FFA000,stroke-width:2px
+    classDef outputStyle fill:#FFF9C4,stroke:#F9A825,stroke-width:2px
+    
+    class USER,CL_INPUT,OR_INPUT,DA_INPUT,WA_INPUT,WF_INPUT,VE_INPUT,REP_INPUT userStyle
+    class API,ORCH_START apiStyle
+    class DB dbStyle
+    class REDIS,STATE_UPDATE redisStyle
+    class WS,WS_EMIT wsStyle
+    class EXEC_LOOP,STEP_ROUTER orchStyle
+    class CL_AGENT,CL_LLM,CL_CONTEXT,CL_OUTPUT,CL_DECISION,CL_PAUSE,CL_PROCEED clarifierStyle
+    class OR_AGENT,OR_CONTEXT,OR_TOOLS,OR_LLM1,OR_LLM2,OR_OUTPUT,OR_VALIDATE,OR_WORKFLOW orchestratorStyle
+    class DA_AGENT,DA_CONTEXT,DA_ITER,DA_SCREENSHOT,DA_PERCEPTION,DA_LLM,DA_TOOLS,DA_EXECUTE,DA_CHECK,DA_COMPLETE,DA_CONTINUE,DA_MAX desktopStyle
+    class WA_AGENT,WA_EAGER,WA_CONTEXT,WA_ITER,WA_SNAPSHOT,WA_PERCEPTION,WA_AUTO,WA_LLM,WA_TOOLS,WA_EXECUTE,WA_CHECK,WA_COMPLETE,WA_CONTINUE,WA_MAX webStyle
+    class WF_SERVICE,WF_LOAD,WF_META,WF_VALIDATE,WF_SERVICES,WF_EXECUTE,WF_STEPS,WF_OUTPUT workflowStyle
+    class VE_AGENT,VE_CONTEXT,VE_LLM,VE_OUTPUT,VE_DECISION,VE_SUCCESS,VE_FAILURE verifierStyle
+    class ESC_START,ESC_COUNTER,ESC_L1,ESC_L2,ESC_L3,ESC_L4,REC_AGENT,REC_CONTEXT,REC_OUTPUT,REC_RETRY,REC_CHECK,REC_CONTINUE,REC_ESCALATE recoveryStyle
+    class REP_AGENT,REP_CONTEXT,REP_LLM,REP_OUTPUT,REP_SAVE reporterStyle
+    class PINCHTAB,VNC externalStyle
+    class FRONTEND frontendStyle
+    class CL_COST,OR_COST,DA_COST,WA_COST,WF_COST,VE_COST,ESC_COST,REP_COST costStyle

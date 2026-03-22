@@ -37,6 +37,7 @@ export default function TaskPage() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const [taskDetails, setTaskDetails] = useState<Task | null>(null);
   const [desktopMode, setDesktopMode] = useState<"online" | "offline">("offline"); // Default to offline for local testing
+  const [isAwaitingPlanApproval, setIsAwaitingPlanApproval] = useState(false);
 
   // Load desktop mode preference from localStorage
   useEffect(() => {
@@ -58,6 +59,7 @@ export default function TaskPage() {
     isLoadingMoreMessages,
     hasMoreMessages,
     toolCalls,
+    agentStatus,
     loadMoreMessages,
     handleAddMessage,
     handleTakeOverTask,
@@ -65,6 +67,35 @@ export default function TaskPage() {
     handleCancelTask,
     currentTaskId,
   } = useChatSession({ initialTaskId: taskId });
+
+  // Check if task is awaiting plan approval - listen to agent status updates
+  useEffect(() => {
+    const checkPlanApprovalStatus = async () => {
+      try {
+        const response = await fetch(`/api/proxy/tasks/${taskId}/shared-state`);
+        if (response.ok) {
+          const sharedState = await response.json();
+          setIsAwaitingPlanApproval(sharedState.status === 'awaiting_plan_approval');
+        }
+      } catch (error) {
+        console.error('Failed to check plan approval status:', error);
+      }
+    };
+    
+    // Check on initial load and when task status changes to NEEDS_HELP
+    if (taskStatus === TaskStatus.NEEDS_HELP) {
+      checkPlanApprovalStatus();
+    } else {
+      setIsAwaitingPlanApproval(false);
+    }
+  }, [taskId, taskStatus]);
+
+  // React to agent status updates from WebSocket
+  useEffect(() => {
+    if (agentStatus?.status === 'awaiting_plan_approval') {
+      setIsAwaitingPlanApproval(true);
+    }
+  }, [agentStatus]);
 
   // Track agent handoffs for notifications (must come after taskStatus is defined)
   const handoffData = useAgentHandoff(taskStatus === TaskStatus.RUNNING ? taskId : null);
@@ -356,6 +387,7 @@ export default function TaskPage() {
                 isLoadingMoreMessages={isLoadingMoreMessages}
                 hasMoreMessages={hasMoreMessages}
                 loadMoreMessages={loadMoreMessages}
+                isAwaitingPlanApproval={isAwaitingPlanApproval}
               />
             </div>
           </div>

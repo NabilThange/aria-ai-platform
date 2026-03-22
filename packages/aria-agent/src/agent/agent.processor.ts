@@ -104,8 +104,8 @@ export class AgentProcessor {
     const status = await this.sharedStateService.get<string>(taskId, 'status');
     
     if (status === 'needs_clarification') {
-      // Task was paused for clarification, restart orchestration
-      this.logger.log(`Restarting orchestration for task ${taskId} with user's clarification response`);
+      // Task was paused for clarification, accumulate history and re-run clarifier
+      this.logger.log(`Resuming clarification for task ${taskId} — accumulating Q&A history`);
       
       const task = await this.tasksService.findById(taskId);
       if (!task) {
@@ -113,55 +113,59 @@ export class AgentProcessor {
         return;
       }
       
-      // Get the latest user message (the clarification response)
+      // Get the latest user message (their answer to the last question)
       const messages = await this.messagesService.findAll(taskId, { limit: 10, page: 1 });
       const latestUserMessage = messages.reverse().find(m => m.role === 'USER');
       
-      let inputWithClarification = task.description;
       if (latestUserMessage && latestUserMessage.content) {
-        // Extract text from message content (content is a JSON array)
         const contentArray = Array.isArray(latestUserMessage.content) 
           ? latestUserMessage.content 
           : [];
-        
-        const textContent = contentArray
+        const latestAnswer = contentArray
           .filter((block: any) => block && typeof block === 'object' && block.type === 'text')
           .map((block: any) => block.text)
           .join('\n');
         
-        if (textContent) {
-          inputWithClarification = `${task.description}\n\nUser clarification: ${textContent}`;
-          this.logger.log(`Appending user clarification: "${textContent}"`);
+        if (latestAnswer) {
+          // Retrieve the question that was just answered (stored by ClarifierAgent)
+          const pendingQuestion = await this.sharedStateService.get<string>(taskId, 'pending_clarification_question');
+          
+          // Load the accumulated Q&A history and append this new turn
+          const existingHistory: Array<{ question: string; answer: string }> = 
+            await this.sharedStateService.get<any[]>(taskId, 'clarification_history') || [];
+          
+          if (pendingQuestion) {
+            existingHistory.push({ question: pendingQuestion, answer: latestAnswer });
+            await this.sharedStateService.set(taskId, 'clarification_history', existingHistory);
+            this.logger.log(`History now has ${existingHistory.length} turn(s) — latest: Q: "${pendingQuestion}" / A: "${latestAnswer}"`);
+          } else {
+            this.logger.warn(`No pending_clarification_question found for task ${taskId} — history not updated`);
+          }
         }
       }
       
-      // Clear the clarification status
+      // Clear the clarification status so orchestration runs cleanly
       await this.sharedStateService.set(taskId, 'status', 'running');
       
-      // Restart orchestration with clarified input
+      // Re-run orchestration — it will pick up the full history from clarification_history
       try {
-        await this.orchestrationService.run(inputWithClarification, taskId, task.model);
+        await this.orchestrationService.run(task.description, taskId, task.model);
         
-        // Check final status
         const finalStatus = await this.sharedStateService.get<string>(taskId, 'status');
         
         if (finalStatus === 'needs_clarification') {
           this.logger.log(`Task ${taskId} needs more clarification`);
-          await this.tasksService.update(taskId, {
-            status: TaskStatus.NEEDS_HELP,
-          });
+          await this.tasksService.update(taskId, { status: TaskStatus.NEEDS_HELP });
+        } else if (finalStatus === 'awaiting_plan_approval') {
+          this.logger.log(`Task ${taskId} awaiting user plan approval`);
+          await this.tasksService.update(taskId, { status: TaskStatus.NEEDS_HELP });
         } else {
-          // Mark task as completed
-          await this.tasksService.update(taskId, {
-            status: TaskStatus.COMPLETED,
-          });
+          await this.tasksService.update(taskId, { status: TaskStatus.COMPLETED });
           this.logger.log(`Task ${taskId} completed after resume`);
         }
       } catch (error) {
         this.logger.error(`Task ${taskId} failed after resume: ${error.message}`);
-        await this.tasksService.update(taskId, {
-          status: TaskStatus.FAILED,
-        });
+        await this.tasksService.update(taskId, { status: TaskStatus.FAILED });
       }
     } else if (this.currentTaskId === taskId && this.isProcessing) {
       // Normal resume during active processing
@@ -192,46 +196,45 @@ export class AgentProcessor {
     const answer = session.answers[0].answer;
     this.logger.log(`User clarification answer: ${answer}`);
     
-    // Resume task processing with the clarified input
-    // Append the answer to the original task description
+    // Retrieve the pending question and accumulate history
     const task = await this.tasksService.findById(taskId);
     if (!task) {
       this.logger.error(`Task ${taskId} not found`);
       return;
     }
     
-    const clarifiedInput = `${task.description}\n\nUser clarification: ${answer}`;
-    this.logger.log(`Resuming task ${taskId} with clarified input`);
+    const pendingQuestion = await this.sharedStateService.get<string>(taskId, 'pending_clarification_question');
+    const existingHistory: Array<{ question: string; answer: string }> = 
+      await this.sharedStateService.get<any[]>(taskId, 'clarification_history') || [];
+    
+    if (pendingQuestion) {
+      existingHistory.push({ question: pendingQuestion, answer });
+      await this.sharedStateService.set(taskId, 'clarification_history', existingHistory);
+      this.logger.log(`History updated: ${existingHistory.length} turn(s)`);
+    }
     
     // Update task status to RUNNING
-    await this.tasksService.update(taskId, {
-      status: TaskStatus.RUNNING,
-    });
+    await this.tasksService.update(taskId, { status: TaskStatus.RUNNING });
     
-    // Restart orchestration with clarified input
+    // Re-run orchestration — will pick up full history from clarification_history in shared state
     try {
-      await this.orchestrationService.run(clarifiedInput, taskId, task.model);
+      await this.orchestrationService.run(task.description, taskId, task.model);
       
-      // Check if task needs more clarification
       const taskStatus = await this.sharedStateService.get<string>(taskId, 'status');
       
       if (taskStatus === 'needs_clarification') {
         this.logger.log(`Task ${taskId} needs more clarification`);
-        await this.tasksService.update(taskId, {
-          status: TaskStatus.NEEDS_HELP,
-        });
+        await this.tasksService.update(taskId, { status: TaskStatus.NEEDS_HELP });
+      } else if (taskStatus === 'awaiting_plan_approval') {
+        this.logger.log(`Task ${taskId} awaiting user plan approval`);
+        await this.tasksService.update(taskId, { status: TaskStatus.NEEDS_HELP });
       } else {
-        // Mark task as completed
-        await this.tasksService.update(taskId, {
-          status: TaskStatus.COMPLETED,
-        });
+        await this.tasksService.update(taskId, { status: TaskStatus.COMPLETED });
         this.logger.log(`Task ${taskId} completed after clarification`);
       }
     } catch (error) {
       this.logger.error(`Task ${taskId} failed after clarification: ${error.message}`);
-      await this.tasksService.update(taskId, {
-        status: TaskStatus.FAILED,
-      });
+      await this.tasksService.update(taskId, { status: TaskStatus.FAILED });
     }
   }
 
@@ -260,7 +263,7 @@ export class AgentProcessor {
       // Delegate to OrchestrationService
       await this.orchestrationService.run(task.description, taskId, task.model);
       
-      // Check if task needs clarification (orchestration service returns early in this case)
+      // Check if task needs clarification or plan approval (orchestration service returns early in these cases)
       const taskStatus = await this.sharedStateService.get<string>(taskId, 'status');
       
       if (taskStatus === 'needs_clarification') {
@@ -269,8 +272,15 @@ export class AgentProcessor {
         await this.tasksService.update(taskId, {
           status: TaskStatus.NEEDS_HELP, // Use NEEDS_HELP status for clarification
         });
+      } else if (taskStatus === 'awaiting_plan_approval') {
+        // Task is paused for plan approval - don't mark as completed
+        this.logger.log(`Task ${taskId} awaiting user plan approval - execution will resume after approval`);
+        await this.tasksService.update(taskId, {
+          status: TaskStatus.NEEDS_HELP, // Use NEEDS_HELP status for plan approval
+        });
+        // approvePlan() will be called via WebSocket event when user approves
       } else {
-        // Mark task as completed
+        // Mark task as completed only if orchestration fully completed
         await this.tasksService.update(taskId, {
           status: TaskStatus.COMPLETED,
         });

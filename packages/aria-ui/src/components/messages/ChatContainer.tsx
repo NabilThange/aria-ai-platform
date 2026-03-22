@@ -23,6 +23,7 @@ interface ChatContainerProps {
   isLoadingMoreMessages: boolean;
   hasMoreMessages: boolean;
   loadMoreMessages: () => Promise<void>;
+  isAwaitingPlanApproval?: boolean;
 }
 
 export function ChatContainer({
@@ -41,6 +42,7 @@ export function ChatContainer({
   hasMoreMessages,
   loadMoreMessages,
   taskId,
+  isAwaitingPlanApproval = false,
 }: ChatContainerProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -100,16 +102,20 @@ export function ChatContainer({
                   group={group}
                   messageIdToIndex={messageIdToIndex}
                   taskStatus={taskStatus}
+                  taskId={taskId}
+                  isAwaitingPlanApproval={isAwaitingPlanApproval}
                 />
               </Fragment>
             ))}
 
-            {/* Tool Calls - Inline with messages */}
-            {toolCalls && toolCalls.size > 0 && (
-              <div className="border-bytebot-bronze-light-7 border-x px-4 py-2">
-                {Array.from(toolCalls.values()).map((toolCall, index) => (
+            {/* Tool Calls - same row styling as AssistantMessage so they blend into the stream */}
+            {toolCalls && (toolCalls instanceof Map ? toolCalls.size > 0 : Object.keys(toolCalls).length > 0) &&
+              (toolCalls instanceof Map ? Array.from(toolCalls.values()) : Object.values(toolCalls)).map((toolCall: any, index) => (
+                <div
+                  key={`${toolCall.agentName}-${toolCall.toolName}-${toolCall.timestamp}-${index}`}
+                  className="bg-bytebot-bronze-light-3 border-x border-bytebot-bronze-light-7 px-4 py-2"
+                >
                   <ToolCallContent
-                    key={`${toolCall.agentName}-${toolCall.toolName}-${toolCall.timestamp}-${index}`}
                     agentName={toolCall.agentName}
                     toolName={toolCall.toolName}
                     toolInput={toolCall.toolInput}
@@ -118,9 +124,9 @@ export function ChatContainer({
                     error={toolCall.error}
                     duration={toolCall.duration}
                   />
-                ))}
-              </div>
-            )}
+                </div>
+              ))
+            }
 
             {taskStatus === TaskStatus.RUNNING &&
               control === Role.ASSISTANT && (

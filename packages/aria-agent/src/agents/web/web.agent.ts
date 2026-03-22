@@ -105,7 +105,7 @@ export class WebAgent extends BaseAgent {
 
   /**
    * EAGER INITIALIZATION: Initialize browser instance immediately when WebAgent starts
-   * This ensures the browser is ready and metadata is available for the LLM
+   * NOW USES PROFILE-BASED PERSISTENCE for session data
    */
   private async initializeBrowserInstance(taskId: string): Promise<void> {
     // Check if instance already exists for this task
@@ -118,13 +118,54 @@ export class WebAgent extends BaseAgent {
       return;
     }
 
-    // Launch new headed instance
     const headedMode = process.env.PINCHTAB_HEADED_MODE === 'true';
     this.logger.log(`🚀 EAGER INITIALIZATION: Launching ${headedMode ? 'HEADED (visible)' : 'HEADLESS'} browser for task ${taskId}`);
     
     try {
-      const instance = await this.pinchTabService.initInstance('default', headedMode, taskId);
-      this.logger.log(`✅ Browser instance launched successfully: ${instance.id}`);
+      // PHASE 1: Profile-based persistence
+      // 1. Check if default profile exists
+      const profileName = 'web-agent-default';
+      let profileId: string;
+      
+      try {
+        const profiles = await this.pinchTabService.listProfiles();
+        const existingProfile = profiles.find(p => p.name === profileName);
+        
+        if (existingProfile) {
+          profileId = existingProfile.id;
+          this.logger.log(`📁 Using existing profile: ${profileName} (${profileId})`);
+        } else {
+          // 2. Create profile if it doesn't exist
+          this.logger.log(`📁 Creating new persistent profile: ${profileName}`);
+          const newProfile = await this.pinchTabService.createProfile(
+            profileName,
+            'Persistent profile for web agent - preserves cookies and session data'
+          );
+          profileId = newProfile.id;
+          this.logger.log(`📁 Profile created: ${profileId}`);
+        }
+      } catch (profileError) {
+        // Fallback to non-profile mode if profile system fails
+        this.logger.warn(`⚠️  Profile system unavailable: ${profileError.message}`);
+        this.logger.log(`⚠️  Falling back to ephemeral instance (no session persistence)`);
+        const instance = await this.pinchTabService.initInstance('default', headedMode, taskId);
+        this.logger.log(`✅ Browser instance launched successfully: ${instance.id}`);
+        await this.collectInstanceMetadata(taskId, instance);
+        this.logger.log(`📊 Instance metadata collected and ready for LLM`);
+        return;
+      }
+      
+      // 3. Start instance with profile
+      const instance = await this.pinchTabService.startInstanceWithProfile(
+        profileId,
+        headedMode ? 'headed' : 'headless'
+      );
+      
+      // Register the instance with taskId
+      this.pinchTabService.registerTaskInstance(taskId, instance);
+      
+      this.logger.log(`✅ Browser instance launched with persistent profile: ${instance.id}`);
+      this.logger.log(`🔒 Session data will persist across restarts`);
       
       // Collect and store instance metadata
       await this.collectInstanceMetadata(taskId, instance);
@@ -812,6 +853,83 @@ ${result.instances ? `🆔 Active Instances: ${result.instances}` : ''}
 🎯 Success criteria met - step execution finished.
 📋 The orchestrator will now proceed to the next step in the plan.`;
 
+      // Profile management tools
+      case 'pinchtab_create_profile':
+        return `✅ SUCCESS: Profile created!
+📁 Profile ID: ${result.id}
+📝 Name: ${result.name || input.name}
+📋 NEXT STEP: Use pinchtab_start_with_profile to launch an instance with this profile.`;
+
+      case 'pinchtab_list_profiles':
+        return `✅ SUCCESS: Found ${result.length} profiles!
+${result.length > 0 ? result.map((p: any, i: number) => `${i + 1}. ${p.name} (ID: ${p.id}, Running: ${p.running || false})`).join('\n') : 'No profiles found.'}
+📋 NEXT STEP: Use pinchtab_start_with_profile to start an instance with a profile.`;
+
+      case 'pinchtab_start_with_profile':
+        return `✅ SUCCESS: Instance started with persistent profile!
+🆔 Instance ID: ${result.id}
+📁 Profile: ${input.profileId}
+🔒 Session data will persist across restarts
+📋 NEXT STEP: Use pinchtab_navigate to go to a URL.`;
+
+      case 'pinchtab_check_profile':
+        return `✅ SUCCESS: Profile status checked!
+📁 Profile: ${input.profileId}
+${result.running ? `✅ Running (Instance ID: ${result.id})` : '❌ Not running'}
+📋 NEXT STEP: ${result.running ? 'Use existing instance' : 'Start instance with pinchtab_start_with_profile'}.`;
+
+      case 'pinchtab_get_profile':
+        return `✅ SUCCESS: Profile details retrieved!
+📁 Name: ${result.name}
+🆔 ID: ${result.id}
+${result.running ? '✅ Currently running' : '❌ Not running'}
+📋 NEXT STEP: Continue with your task.`;
+
+      case 'pinchtab_stop_by_profile':
+        return `✅ SUCCESS: Instance stopped (profile preserved)!
+📁 Profile: ${input.profileId}
+🔒 Session data saved and will persist
+📋 NEXT STEP: Restart with pinchtab_start_with_profile to resume session.`;
+
+      // New action tools
+      case 'pinchtab_hover':
+        return `✅ SUCCESS: Element hovered!
+🎯 Element: ${input.ref}
+📋 NEXT STEP: Check if tooltip/menu appeared with pinchtab_get_snapshot.`;
+
+      case 'pinchtab_focus':
+        return `✅ SUCCESS: Element focused!
+🎯 Element: ${input.ref}
+📋 NEXT STEP: Type into the focused element with pinchtab_type.`;
+
+      case 'pinchtab_select':
+        return `✅ SUCCESS: Dropdown option selected!
+🎯 Element: ${input.ref}
+📝 Value: ${input.value}
+📋 NEXT STEP: Continue with your task.`;
+
+      // New read tools
+      case 'pinchtab_get_text':
+        return `✅ SUCCESS: Page text extracted!
+📄 Length: ${result.length} characters
+📋 NEXT STEP: Analyze the text content.`;
+
+      case 'pinchtab_screenshot':
+        return `✅ SUCCESS: Screenshot captured!
+📸 Screenshot data available
+📋 NEXT STEP: Use for visual debugging or analysis.`;
+
+      case 'pinchtab_eval':
+        return `✅ SUCCESS: JavaScript executed!
+📜 Result: ${JSON.stringify(result).substring(0, 200)}
+📋 NEXT STEP: Use the result for debugging or data extraction.`;
+
+      case 'pinchtab_find':
+        return `✅ SUCCESS: Elements found!
+🔍 Query: ${input.query}
+📊 Found: ${result.length} elements
+📋 NEXT STEP: Interact with found elements.`;
+
       default:
         return `✅ SUCCESS: Tool "${toolName}" executed successfully.
 📋 NEXT STEP: Continue with your task.`;
@@ -998,6 +1116,112 @@ ${result.instances ? `🆔 Active Instances: ${result.instances}` : ''}
           this.logger.log(`   ✓ Tool Result: Step marked as complete`);
           break;
 
+        // ============================================================================
+        // PHASE 1: PROFILE MANAGEMENT TOOLS
+        // ============================================================================
+
+        case 'pinchtab_create_profile':
+          this.logger.log(`   → Creating profile: ${input.name}`);
+          result = await this.pinchTabService.createProfile(input.name, input.description);
+          this.logger.log(`   ✓ Tool Result: Profile created with ID = ${result.id}`);
+          break;
+
+        case 'pinchtab_list_profiles':
+          this.logger.log(`   → Listing profiles`);
+          result = await this.pinchTabService.listProfiles();
+          this.logger.log(`   ✓ Tool Result: Found ${result.length} profiles`);
+          if (result.length > 0) {
+            result.forEach((profile: any, idx: number) => {
+              this.logger.log(`      ${idx + 1}. ${profile.name} (ID: ${profile.id}, Running: ${profile.running || false})`);
+            });
+          }
+          break;
+
+        case 'pinchtab_start_with_profile':
+          this.logger.log(`   → Starting instance with profile: ${input.profileId} (${input.mode})`);
+          result = await this.pinchTabService.startInstanceWithProfile(input.profileId, input.mode);
+          
+          // Register the instance with taskId
+          this.pinchTabService.registerTaskInstance(taskId, result);
+          this.logger.log(`   ✓ Tool Result: Instance started with ID = ${result.id}`);
+          this.logger.log(`   ✓ Instance registered for task ${taskId}`);
+          break;
+
+        case 'pinchtab_check_profile':
+          this.logger.log(`   → Checking profile instance: ${input.profileId}`);
+          result = await this.pinchTabService.getProfileInstance(input.profileId);
+          this.logger.log(`   ✓ Tool Result: Running = ${result.running}, ID = ${result.id || 'N/A'}`);
+          break;
+
+        case 'pinchtab_get_profile':
+          this.logger.log(`   → Getting profile: ${input.idOrName}`);
+          result = await this.pinchTabService.getProfile(input.idOrName);
+          this.logger.log(`   ✓ Tool Result: Profile found - ${result.name} (ID: ${result.id})`);
+          break;
+
+        case 'pinchtab_stop_by_profile':
+          this.logger.log(`   → Stopping instance by profile: ${input.profileId}`);
+          result = await this.pinchTabService.stopInstanceByProfile(input.profileId);
+          this.logger.log(`   ✓ Tool Result: Instance stopped for profile ${input.profileId}`);
+          break;
+
+        // ============================================================================
+        // PHASE 2: MISSING ACTIONS (hover, focus, select)
+        // ============================================================================
+
+        case 'pinchtab_hover':
+          await this.ensurePinchTabInstance(taskId);
+          this.logger.log(`   → Hovering over element: ${input.ref}`);
+          result = await this.pinchTabService.hover(input.ref, undefined, taskId);
+          this.logger.log(`   ✓ Tool Result: Element hovered successfully`);
+          break;
+
+        case 'pinchtab_focus':
+          await this.ensurePinchTabInstance(taskId);
+          this.logger.log(`   → Focusing element: ${input.ref}`);
+          result = await this.pinchTabService.focus(input.ref, undefined, taskId);
+          this.logger.log(`   ✓ Tool Result: Element focused successfully`);
+          break;
+
+        case 'pinchtab_select':
+          await this.ensurePinchTabInstance(taskId);
+          this.logger.log(`   → Selecting option in ${input.ref}: ${input.value}`);
+          result = await this.pinchTabService.select(input.ref, input.value, undefined, taskId);
+          this.logger.log(`   ✓ Tool Result: Option selected successfully`);
+          break;
+
+        // ============================================================================
+        // PHASE 2: MISSING READ ENDPOINTS
+        // ============================================================================
+
+        case 'pinchtab_get_text':
+          await this.ensurePinchTabInstance(taskId);
+          this.logger.log(`   → Getting page text`);
+          result = await this.pinchTabService.getPageText(undefined, taskId);
+          this.logger.log(`   ✓ Tool Result: Page text extracted (${result.length} characters)`);
+          break;
+
+        case 'pinchtab_screenshot':
+          await this.ensurePinchTabInstance(taskId);
+          this.logger.log(`   → Taking screenshot`);
+          result = await this.pinchTabService.takeScreenshot(undefined, taskId);
+          this.logger.log(`   ✓ Tool Result: Screenshot captured`);
+          break;
+
+        case 'pinchtab_eval':
+          await this.ensurePinchTabInstance(taskId);
+          this.logger.log(`   → Evaluating JavaScript: ${input.script.substring(0, 100)}...`);
+          result = await this.pinchTabService.evalJavaScript(input.script, undefined, taskId);
+          this.logger.log(`   ✓ Tool Result: JavaScript executed, result = ${JSON.stringify(result).substring(0, 200)}`);
+          break;
+
+        case 'pinchtab_find':
+          await this.ensurePinchTabInstance(taskId);
+          this.logger.log(`   → Finding elements: ${input.query}`);
+          result = await this.pinchTabService.findElements(input.query, undefined, taskId);
+          this.logger.log(`   ✓ Tool Result: Found ${result.length} elements`);
+          break;
+
         default:
           this.logger.warn(`   ⚠️  Unknown tool: ${name}`);
       }
@@ -1055,8 +1279,9 @@ ${result.instances ? `🆔 Active Instances: ${result.instances}` : ''}
         return null;
       }
 
-      // PinchTab screenshot endpoint
-      const response = await fetch(`http://localhost:9867/tabs/${tabId}/screenshot`, {
+      // PinchTab screenshot endpoint - use environment variable for Docker compatibility
+      const pinchtabBaseUrl = process.env.PINCHTAB_BASE_URL || 'http://localhost:9867';
+      const response = await fetch(`${pinchtabBaseUrl}/tabs/${tabId}/screenshot`, {
         method: 'GET',
       });
 

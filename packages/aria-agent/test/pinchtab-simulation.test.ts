@@ -130,6 +130,9 @@ describe('PinchTab Web Agent Simulation', () => {
     );
     
     expect(searchBox).toBeDefined();
+    if (!searchBox) {
+      throw new Error('Search box not found');
+    }
     Logger.log(`🎯 Found search box: ref="${searchBox.ref}", tag="${searchBox.tag}"`);
 
     // STEP 6: Click the search box to focus it
@@ -161,6 +164,9 @@ describe('PinchTab Web Agent Simulation', () => {
     );
     
     expect(searchButton).toBeDefined();
+    if (!searchButton) {
+      throw new Error('Search button not found');
+    }
     Logger.log(`🎯 Found search button: ref="${searchButton.ref}", tag="${searchButton.tag}"`);
 
     // STEP 9: Click the search button

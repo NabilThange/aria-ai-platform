@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircleIcon, XCircleIcon } from "@hugeicons/core-free-icons";
+import { CheckmarkCircle01Icon, CancelCircleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 interface TaskSummaryData {
@@ -70,11 +70,11 @@ export function TaskSummary({ taskId, status }: TaskSummaryProps) {
       <div className="mb-4 flex items-center gap-3">
         {status === "COMPLETED" ? (
           <HugeiconsIcon
-            icon={CheckCircleIcon}
+            icon={CheckmarkCircle01Icon}
             className="h-6 w-6 text-green-600"
           />
         ) : (
-          <HugeiconsIcon icon={XCircleIcon} className="h-6 w-6 text-red-600" />
+          <HugeiconsIcon icon={CancelCircleIcon} className="h-6 w-6 text-red-600" />
         )}
         <h2 className="text-xl font-semibold">Task Summary</h2>
         <Badge

@@ -23,13 +23,22 @@ const REDACTED_PATHS = [
 
 const isDev = process.env.NODE_ENV !== 'production';
 
+// Check if pino-pretty is available (only in dev, not in production Docker)
+let hasPinoPretty = false;
+try {
+  require.resolve('pino-pretty');
+  hasPinoPretty = true;
+} catch {
+  hasPinoPretty = false;
+}
+
 export const pinoLoggerConfig: Params = {
   pinoHttp: {
     // Use LOG_LEVEL env var, default to 'info' in prod, 'debug' in dev
     level: process.env.LOG_LEVEL ?? (isDev ? 'debug' : 'info'),
 
-    // Structured JSON in prod, pretty-printed in dev
-    transport: isDev
+    // Structured JSON in prod, pretty-printed in dev (only if pino-pretty is available)
+    transport: isDev && hasPinoPretty
       ? {
           target: 'pino-pretty',
           options: {

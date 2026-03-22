@@ -258,4 +258,232 @@ export const pinchTabTools = [
       },
     },
   },
+  // ============================================================================
+  // PHASE 1: PROFILE MANAGEMENT TOOLS
+  // ============================================================================
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_create_profile',
+      description: 'Create a named persistent profile for session persistence (cookies, localStorage, etc.)',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Profile name (e.g., "gmail-profile", "web-agent-default")',
+          },
+          description: {
+            type: 'string',
+            description: 'Optional description of the profile purpose',
+          },
+        },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_list_profiles',
+      description: 'List all saved persistent profiles with their names and running status',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_start_with_profile',
+      description: 'Start a browser instance bound to a specific profileId (enables session persistence)',
+      parameters: {
+        type: 'object',
+        properties: {
+          profileId: {
+            type: 'string',
+            description: 'The profile ID to use',
+          },
+          mode: {
+            type: 'string',
+            enum: ['headed', 'headless'],
+            description: 'headed = visible in VNC, headless = background',
+          },
+        },
+        required: ['profileId', 'mode'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_check_profile',
+      description: 'Check if a profile has a running instance',
+      parameters: {
+        type: 'object',
+        properties: {
+          profileId: {
+            type: 'string',
+            description: 'The profile ID to check',
+          },
+        },
+        required: ['profileId'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_get_profile',
+      description: 'Get details about a specific profile by ID or name',
+      parameters: {
+        type: 'object',
+        properties: {
+          idOrName: {
+            type: 'string',
+            description: 'Profile ID or name',
+          },
+        },
+        required: ['idOrName'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_stop_by_profile',
+      description: 'Stop instance by profile ID (preserves profile data)',
+      parameters: {
+        type: 'object',
+        properties: {
+          profileId: {
+            type: 'string',
+            description: 'The profile ID',
+          },
+        },
+        required: ['profileId'],
+      },
+    },
+  },
+  // ============================================================================
+  // PHASE 2: MISSING ACTIONS (hover, focus, select)
+  // ============================================================================
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_hover',
+      description: 'Hover over an element to reveal tooltips or menus',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: {
+            type: 'string',
+            description: 'The element reference ID from the snapshot',
+          },
+        },
+        required: ['ref'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_focus',
+      description: 'Focus an element (useful for inputs before typing)',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: {
+            type: 'string',
+            description: 'The element reference ID from the snapshot',
+          },
+        },
+        required: ['ref'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_select',
+      description: 'Select a dropdown option by value',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: {
+            type: 'string',
+            description: 'The select element reference ID from the snapshot',
+          },
+          value: {
+            type: 'string',
+            description: 'The option value to select',
+          },
+        },
+        required: ['ref', 'value'],
+      },
+    },
+  },
+  // ============================================================================
+  // PHASE 2: MISSING READ ENDPOINTS
+  // ============================================================================
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_get_text',
+      description: 'Extract full page text (token-efficient, ~800 tokens vs 10k for screenshot)',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_screenshot',
+      description: 'Take a screenshot of the current page',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_eval',
+      description: 'Run JavaScript in the page context (e.g., document.cookie, localStorage.getItem())',
+      parameters: {
+        type: 'object',
+        properties: {
+          script: {
+            type: 'string',
+            description: 'JavaScript code to execute',
+          },
+        },
+        required: ['script'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'pinchtab_find',
+      description: 'Find elements by text or selector',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Search query (text or CSS selector)',
+          },
+        },
+        required: ['query'],
+      },
+    },
+  },
 ];

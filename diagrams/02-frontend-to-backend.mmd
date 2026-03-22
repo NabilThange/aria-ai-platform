@@ -1,0 +1,58 @@
+sequenceDiagram
+    participant U as 👤 User
+    participant UI as 📱 React UI<br/>(TasksPage)
+    participant WS as 🔌 WebSocket<br/>(useWebSocket)
+    participant API as 🚪 API Proxy<br/>(route.ts)
+    participant TC as 🎯 TasksController<br/>(POST /tasks)
+    participant TS as 📦 TasksService<br/>(create)
+    participant DB as 💾 PostgreSQL<br/>(Prisma)
+    participant Redis as 🔴 Redis<br/>(Shared State)
+    participant GW as ⚡ TasksGateway<br/>(WebSocket)
+    participant OS as 🎭 OrchestrationService<br/>(run)
+    
+    rect rgb(255, 230, 204)
+    Note over U,UI: USER INPUT PHASE
+    U->>UI: Enter task description<br/>"Search Google for Python courses"
+    U->>UI: Optional: Attach files (base64)
+    U->>UI: Click Submit
+    end
+    
+    rect rgb(230, 242, 255)
+    Note over UI,API: API REQUEST PHASE
+    UI->>API: POST /api/proxy/tasks<br/>{description, files, model}
+    API->>TC: Forward to backend<br/>localhost:3001/tasks
+    end
+    
+    rect rgb(213, 232, 212)
+    Note over TC,DB: TASK CREATION PHASE
+    TC->>TS: create(createTaskDto)
+    TS->>DB: Create task record<br/>status: PENDING
+    DB-->>TS: Task created<br/>taskId: "abc123"
+    TS->>DB: Save files (if any)<br/>base64 → database
+    TS->>DB: Create system message<br/>"Task created"
+    end
+    
+    rect rgb(255, 230, 230)
+    Note over TS,Redis: STATE INITIALIZATION
+    TS->>Redis: Publish event<br/>aria:tasks:pending
+    TS->>Redis: Initialize state<br/>task:abc123:status = "pending"
+    end
+    
+    rect rgb(225, 213, 231)
+    Note over GW,WS: WEBSOCKET NOTIFICATION
+    GW->>WS: Emit task_created<br/>{id, status, description}
+    WS->>UI: Update task list<br/>Show new task
+    end
+    
+    rect rgb(255, 242, 204)
+    Note over OS: ORCHESTRATION STARTS
+    TS->>OS: run(userInput, taskId)
+    Note over OS: Sequential pipeline begins<br/>CLARIFIER → ORCHESTRATOR → AGENTS
+    end
+    
+    rect rgb(230, 255, 230)
+    Note over UI: FRONTEND DISPLAY
+    UI->>U: Show task in list<br/>Status: PENDING
+    UI->>U: Connect to WebSocket<br/>Join task room
+    UI->>U: Display: "Starting task..."
+    end

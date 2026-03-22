@@ -32,6 +32,7 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [toolCalls, setToolCalls] = useState<Map<string, any>>(new Map());
+  const [agentStatus, setAgentStatus] = useState<{ status: string; activeAgent: string | null } | null>(null);
 
   const processedMessageIds = useRef<Set<string>>(new Set());
 
@@ -150,6 +151,10 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
     onTaskCreated: handleTaskCreated,
     onTaskDeleted: handleTaskDeleted,
     onBrowserLog: handleBrowserLog,
+    onAgentStatus: (status) => {
+      logger.debug({ event: 'agent_status.received', status: status.status, activeAgent: status.activeAgent }, 'Agent status update');
+      setAgentStatus(status);
+    },
   });
 
   // Load more messages function for infinite scroll
@@ -373,6 +378,7 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
     isLoadingMoreMessages,
     hasMoreMessages,
     toolCalls,
+    agentStatus,
     loadMoreMessages,
     handleAddMessage,
     handleTakeOverTask,

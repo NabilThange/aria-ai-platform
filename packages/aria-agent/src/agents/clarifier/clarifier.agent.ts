@@ -4,15 +4,15 @@ import { SharedStateService } from '../../shared-state/shared-state.service';
 import { GroqService } from '../../groq/groq.service';
 import { AGENT_MODELS } from '../../config/agents.config';
 import { getAgentSystemPrompt } from '../../config/system-prompts.config';
-import { ClarifiedTask } from './clarifier.types';
+import { ClarifiedTask, ClarificationHistory } from './clarifier.types';
 import { extractJSON } from '../../utils/json.util';
 import { MessagesService } from '../../messages/messages.service';
 import { BrowserLoggerService } from '../../logger/browser-logger.service';
 
 /**
- * ClarifierAgent - Resolves user intent ambiguity via Q&A
+ * ClarifierAgent - Conversational chatbot mode
+ * Asks ONE question per round, receives full Q&A history each time.
  * Model: Groq GPT-OSS 20B (fast, user is waiting)
- * Runs once at the start of each task
  */
 @Injectable()
 export class ClarifierAgent extends BaseAgent {
@@ -28,25 +28,29 @@ export class ClarifierAgent extends BaseAgent {
   }
 
   /**
-   * Clarify user intent through Q&A
-   * @param input - Raw user input string
+   * Clarify user intent through conversational Q&A
+   * @param input - Raw user input string or object with userInput + history
    * @param taskId - Task ID for shared state access
    */
   async run(input: any, taskId: string): Promise<AgentResult> {
     try {
-      this.logger.log(`📝 Analyzing user input for task ${taskId}`);
+      const userInput = typeof input === 'string' ? input : (input.userInput || input);
+      const history: ClarificationHistory = (typeof input === 'object' && input.history) ? input.history : [];
 
-      const userInput = typeof input === 'string' ? input : input.userInput;
-      this.logger.log(`   Input: "${userInput.substring(0, 100)}..."`);
+      this.logger.log(`📝 Clarifier round ${history.length + 1} for task ${taskId}`);
+      this.logger.log(`   Original input: "${userInput.substring(0, 100)}"`);
+      if (history.length > 0) {
+        this.logger.log(`   History turns: ${history.length}`);
+      }
 
-      // Build clarification prompt
-      const prompt = this.buildClarificationPrompt(userInput);
+      // Build prompt with full history
+      const prompt = this.buildClarificationPrompt(userInput, history);
 
       // LOG AGENT START TO BROWSER
       this.browserLogger.logAgentStart(taskId, 'CLARIFIER_AGENT', {
         systemPrompt: this.getSystemPrompt(),
         userPrompt: prompt,
-        context: { userInput: userInput.substring(0, 200) },
+        context: { userInput: userInput.substring(0, 200), historyTurns: history.length },
       });
 
       // Call Groq for clarification
@@ -74,25 +78,31 @@ export class ClarifierAgent extends BaseAgent {
       const clarifiedTask = this.parseClarifiedTask(response, userInput);
 
       // LOG CLARIFIER OUTPUT
-      this.logger.log(`📝 [ClarifierAgent] Clarified task:`);
+      this.logger.log(`📝 [ClarifierAgent] Round ${history.length + 1} result:`);
       this.logger.log(`   Goal: ${clarifiedTask.clarified_goal}`);
       this.logger.log(`   Type: ${clarifiedTask.task_type}`);
-      this.logger.log(`   Constraints: ${clarifiedTask.constraints.length}`);
-      this.logger.log(`   Assumptions: ${clarifiedTask.assumptions.length}`);
       this.logger.log(`   Questions asked: ${clarifiedTask.questions_asked}`);
 
-      // Save clarification as message
-      if (clarifiedTask.questions_asked > 0 && clarifiedTask.clarified_goal?.startsWith('REQUIRES_USER_CLARIFICATION:')) {
-        // Save question
-        const question = clarifiedTask.clarified_goal.replace('REQUIRES_USER_CLARIFICATION:', '').trim();
+      if (clarifiedTask.questions_asked === 1 && clarifiedTask.question) {
+        // Save the single question as a message
         await this.messagesService.createAgentActionMessage(
           taskId,
           'CLARIFIER',
           'question',
-          { question },
+          {
+            question: clarifiedTask.question.question,
+            questionId: clarifiedTask.question.id,
+            questionType: clarifiedTask.question.type,
+            required: clarifiedTask.question.required,
+            assumption: clarifiedTask.question.assumption,
+          },
         );
+
+        // Store the pending question in shared state so AgentProcessor can build history
+        await this.sharedState.set(taskId, 'pending_clarification_question', clarifiedTask.question.question);
+        this.logger.log(`   Question: ${clarifiedTask.question.question}`);
       } else {
-        // Save thinking/clarification
+        // No more questions — save thinking message
         await this.messagesService.createAgentActionMessage(
           taskId,
           'CLARIFIER',
@@ -101,9 +111,11 @@ export class ClarifierAgent extends BaseAgent {
             thinking: `Clarified task: ${clarifiedTask.clarified_goal} (Type: ${clarifiedTask.task_type})`,
           },
         );
+        // Clear pending question since we're done clarifying
+        await this.sharedState.set(taskId, 'pending_clarification_question', null);
       }
 
-      // Write to shared state
+      // Write full clarified task to shared state
       await this.writeState(taskId, 'task_goal', clarifiedTask);
 
       // Log to action history
@@ -113,6 +125,7 @@ export class ClarifierAgent extends BaseAgent {
         result: 'success',
         timestamp: new Date().toISOString(),
         details: {
+          round: history.length + 1,
           questions_asked: clarifiedTask.questions_asked,
           task_type: clarifiedTask.task_type,
         },
@@ -140,12 +153,30 @@ export class ClarifierAgent extends BaseAgent {
     return getAgentSystemPrompt('CLARIFIER');
   }
 
-  private buildClarificationPrompt(userInput: string): string {
-    return `Analyze this user request and clarify the intent:
+  /**
+   * Build the prompt including the full Q&A history so the LLM
+   * can evaluate whether it has enough information.
+   */
+  private buildClarificationPrompt(userInput: string, history: ClarificationHistory): string {
+    let prompt = `Original request: "${userInput}"\n`;
 
-"${userInput}"
+    if (history.length > 0) {
+      prompt += `\nConversation so far:\n`;
+      for (const turn of history) {
+        prompt += `Q: ${turn.question}\nA: ${turn.answer}\n`;
+      }
+      prompt += `\nYou have asked ${history.length} question(s) so far (max 6 total). `;
+      if (history.length >= 6) {
+        prompt += `You have reached the maximum — you MUST set questions_asked = 0 and produce a clarified_goal now.\n`;
+      } else {
+        prompt += `Decide: do you have enough to proceed, or do you need one more answer?\n`;
+      }
+    } else {
+      prompt += `\nThis is the first round. Analyze the request and decide: is it clear enough to act, or do you need to ask one question?\n`;
+    }
 
-Respond with JSON only, following the exact schema in the system prompt.`;
+    prompt += `\nRespond with JSON only, following the exact schema in the system prompt.`;
+    return prompt;
   }
 
   private parseClarifiedTask(response: any, originalInput: string): ClarifiedTask {
@@ -164,19 +195,53 @@ Respond with JSON only, following the exact schema in the system prompt.`;
         throw new Error('Invalid clarified task structure');
       }
 
+      const questionsAsked = parsed.questions_asked ?? 0;
+      if (questionsAsked !== 0 && questionsAsked !== 1) {
+        throw new Error(`questions_asked must be 0 or 1, got: ${questionsAsked}`);
+      }
+
+      // Validate singular question when questions_asked = 1
+      if (questionsAsked === 1) {
+        // Handle both `question` (new singular) and `questions` (old array — be tolerant)
+        const q = parsed.question ?? (Array.isArray(parsed.questions) ? parsed.questions[0] : null);
+        if (!q || !q.id || !q.question || !q.type || typeof q.required !== 'boolean') {
+          throw new Error('questions_asked = 1 but question object is missing or invalid');
+        }
+        if (!['text', 'choice', 'confirm'].includes(q.type)) {
+          throw new Error('Invalid question type');
+        }
+
+        return {
+          original_input: originalInput,
+          clarified_goal: 'REQUIRES_USER_CLARIFICATION',
+          constraints: parsed.constraints,
+          assumptions: parsed.assumptions,
+          task_type: parsed.task_type,
+          questions_asked: 1,
+          question: {
+            id: q.id,
+            question: q.question,
+            type: q.type,
+            choices: q.choices,
+            required: q.required,
+            assumption: q.assumption,
+          },
+        };
+      }
+
       return {
         original_input: originalInput,
         clarified_goal: parsed.clarified_goal,
         constraints: parsed.constraints,
         assumptions: parsed.assumptions,
         task_type: parsed.task_type,
-        questions_asked: parsed.questions_asked || 0,
+        questions_asked: 0,
       };
     } catch (error) {
       this.logger.error(`Failed to parse clarified task: ${error.message}`);
       this.logger.error(`Response content: ${content.substring(0, 500)}...`);
 
-      // Return safe default
+      // Return safe default — proceed without clarification on parse error
       return {
         original_input: originalInput,
         clarified_goal: originalInput,
@@ -190,7 +255,6 @@ Respond with JSON only, following the exact schema in the system prompt.`;
 
   private calculateCost(tokens: number): number {
     // Groq GPT-OSS 20B pricing (approximate)
-    // Input: $0.10 per 1M tokens, Output: $0.10 per 1M tokens
     const costPerToken = 0.10 / 1_000_000;
     return tokens * costPerToken;
   }

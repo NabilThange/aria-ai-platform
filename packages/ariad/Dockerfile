@@ -45,7 +45,7 @@ ENV DISPLAY=:0 \
     LANG=en_US.UTF-8 \
     LC_ALL=C
 
-# All system packages in one layer — build deps excluded
+# All system packages in one layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # X11/VNC stack
     xvfb x11vnc xauth x11-xserver-utils \
@@ -58,6 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fontconfig fonts-dejavu-core \
     # System
     dbus dbus-x11 wmctrl sudo ca-certificates \
+    dos2unix \
     # Process management
     supervisor socat \
     # Python (for websockify)
@@ -67,12 +68,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxkbcommon0 libxkbcommon-x11-0 \
     # GL/GPU stubs
     libgl1-mesa-dri libgl1-mesa-glx libcap2-bin \
-    # VSCode deps
-    libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
-    libcairo2 libcups2 libdrm2 libgbm1 libglib2.0-0 libgtk-3-0 \
-    libnspr4 libnss3 libpango-1.0-0 libx11-xcb1 libxcb-dri3-0 \
-    libxcomposite1 libxdamage1 libxfixes3 libxkbfile1 \
-    xclip curl \
+    xclip curl jq \
     && apt-get remove -y --purge \
         light-locker xfce4-screensaver xfce4-power-manager \
         xfce4-notifyd xfce4-pulseaudio-plugin \
@@ -88,16 +84,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# VSCode
-RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-        | gpg --dearmor -o /usr/share/keyrings/microsoft-archive-keyring.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-archive-keyring.gpg] https://packages.microsoft.com/repos/code stable main" \
-        > /etc/apt/sources.list.d/vscode.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends code \
-    && sed -i 's|Exec=/usr/bin/code|Exec=/usr/bin/code --no-sandbox --disable-gpu|g' /usr/share/applications/code.desktop \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/*
 
 # Chromium
 RUN apt-get update \
@@ -115,16 +101,26 @@ RUN apt-get update \
     && fc-cache -f -v \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/*
 
-# websockify + pinchtab
+# websockify + pinchtab + kilocode
 RUN pip3 install --no-cache-dir websockify \
-    && npm install -g pinchtab \
+    && npm install -g pinchtab @kilocode/cli \
     && npm cache clean --force
 
 # Copy built ariad from builder stage
 COPY --from=builder /aria /aria
 
-# System config files
+# System config files (supervisord, xfce config, scripts etc)
 COPY ./ariad/root/. /
+
+# Fix Windows line endings on ALL shell scripts in /usr/local/bin
+# This is critical — scripts created on Windows have \r\n which breaks bash
+RUN find /usr/local/bin -type f | xargs file | grep -i "CRLF\|text" | cut -d: -f1 | xargs -r dos2unix 2>/dev/null || true \
+    && dos2unix /usr/local/bin/aria-mail 2>/dev/null || true \
+    && dos2unix /usr/local/bin/pinchtab-wrapper.sh 2>/dev/null || true \
+    && dos2unix /usr/local/bin/send_email.py 2>/dev/null || true \
+    && chmod +x /usr/local/bin/aria-mail \
+    && chmod +x /usr/local/bin/pinchtab-wrapper.sh 2>/dev/null || true \
+    && chmod +x /usr/local/bin/send_email.py 2>/dev/null || true
 
 # Wallpaper
 COPY ariad/ARIA-BG.png /usr/share/backgrounds/aria-bg.png
@@ -136,11 +132,10 @@ RUN useradd -m -s /bin/bash user \
         /home/user/.config/autostart /home/user/.local/share \
         /home/user/.cache /home/user/.pinchtab /data/pinchtab \
     && chown -R user:user /tmp/aria-screenshots /home/user /data/pinchtab \
-    # Desktop shortcuts
-    && for f in chromium-browser code xfce4-terminal thunar mousepad; do \
+    # Desktop shortcuts — chromium, terminal, thunar, mousepad only (no vscode)
+    && for f in chromium-browser xfce4-terminal thunar mousepad; do \
         cp -f /usr/share/applications/$f.desktop /home/user/Desktop/ 2>/dev/null || true; \
        done \
-    && sed -i 's|Exec=/usr/bin/code --password-store=basic|Exec=/usr/bin/code --no-sandbox --disable-gpu --password-store=basic|' /home/user/Desktop/code.desktop 2>/dev/null || true \
     && chmod +x /home/user/Desktop/*.desktop 2>/dev/null || true \
     && gtk-update-icon-cache -f /usr/share/icons/hicolor/ 2>/dev/null || true \
     # Gmail shortcut

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight02Icon, Attachment01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
+import { MicButton } from "./MicButton";
 
 interface FileWithBase64 {
   name: string;
@@ -34,6 +35,7 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFiles, setSelectedFiles] = useState<FileWithBase64[]>([]);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [isInputFocused, setIsInputFocused] = useState(false);
   
   const MAX_FILES = 5;
   const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB per file in bytes
@@ -128,6 +130,12 @@ export function ChatInput({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const handleTranscription = (text: string) => {
+    onInputChange(text);
+    // Auto-focus textarea after transcription
+    textareaRef.current?.focus();
+  };
+
   // Auto-resize textarea based on content
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -201,6 +209,8 @@ export function ChatInput({
           placeholder={placeholder}
           value={input}
           onChange={(e) => onInputChange(e.target.value)}
+          onFocus={() => setIsInputFocused(true)}
+          onBlur={() => setIsInputFocused(false)}
           className={cn(
             "placeholder:text-bytebot-bronze-light-10 w-full rounded-lg py-2 pr-16 pl-3 placeholder:text-[13px]",
             "file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-bytebot-bronze-light-7 flex min-w-0 border bg-transparent text-base shadow-xs transition-[color,box-shadow] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
@@ -217,6 +227,13 @@ export function ChatInput({
           }}
         />
         <div className={`absolute right-2 ${buttonPositionClass} flex items-center gap-1`}>
+          <MicButton
+            onTranscription={handleTranscription}
+            disabled={isLoading}
+            isInputEmpty={!input.trim()}
+            isInputFocused={isInputFocused}
+          />
+          
           <Button
             type="button"
             variant="ghost"

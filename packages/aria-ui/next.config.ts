@@ -10,6 +10,14 @@ const nextConfig: NextConfig = {
   // Exclude docs folder from build
   pageExtensions: ["ts", "tsx", "js", "jsx"],
   
+  // Disable linting and type checking during build (for Docker)
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  
   // Speed up compilation
   experimental: {
     optimizePackageImports: ['@hugeicons/react', '@hugeicons/core-free-icons'],

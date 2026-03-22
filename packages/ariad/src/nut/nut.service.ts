@@ -275,6 +275,35 @@ export class NutService {
     }
   }
 
+  async copyToClipboard(text: string): Promise<void> {
+    this.logger.log(`Copying to clipboard: ${text.substring(0, 50)}...`);
+
+    try {
+      // Copy text to clipboard using xclip via spawn
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn('xclip', ['-selection', 'clipboard'], {
+          env: { ...process.env, DISPLAY: ':0.0' },
+          stdio: ['pipe', 'ignore', 'inherit'],
+        });
+
+        child.once('error', reject);
+        child.once('close', (code) => {
+          code === 0
+            ? resolve()
+            : reject(new Error(`xclip exited with code ${code}`));
+        });
+
+        child.stdin.write(text);
+        child.stdin.end();
+      });
+
+      // brief pause to ensure clipboard owner is set
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } catch (error) {
+      throw new Error(`Failed to copy to clipboard: ${error.message}`);
+    }
+  }
+
   /**
    * Converts a character to its corresponding key information.
    *

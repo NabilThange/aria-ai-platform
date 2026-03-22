@@ -87,29 +87,57 @@ export class BytezKeyManagerService {
 
   /**
    * Mark the current key as failed and rotate to the next one
+   * Detects API key errors (rate limits, quota, invalid key) and immediately rotates
    */
   markCurrentKeyAsFailed(error?: any): void {
     if (this.keys.length === 0) return;
 
     const currentKey = this.keys[this.currentKeyIndex];
-    currentKey.failureCount++;
-    currentKey.lastFailure = new Date();
-
     const keyLabel = `Key ${this.currentKeyIndex + 1}`;
-    this.logger.warn(
-      `${keyLabel} failed (${currentKey.failureCount}/${this.maxFailuresBeforeDisable} failures). Error: ${error?.message || 'Unknown'}`,
-    );
+    
+    // Detect API key-related errors (rate limit, quota, invalid key, etc.)
+    const errorMessage = error?.message?.toLowerCase() || '';
+    const isApiKeyError = 
+      errorMessage.includes('rate limit') ||
+      errorMessage.includes('quota') ||
+      errorMessage.includes('tokens per minute') ||
+      errorMessage.includes('tpm') ||
+      errorMessage.includes('rpm') ||
+      errorMessage.includes('invalid api key') ||
+      errorMessage.includes('unauthorized') ||
+      errorMessage.includes('insufficient') ||
+      errorMessage.includes('exceeded') ||
+      errorMessage.includes('billing') ||
+      errorMessage.includes('payment');
 
-    // Disable key if it has failed too many times
-    if (currentKey.failureCount >= this.maxFailuresBeforeDisable) {
+    if (isApiKeyError) {
+      // Immediately disable key on API key errors
       currentKey.isDisabled = true;
+      currentKey.lastFailure = new Date();
       this.logger.error(
-        `${keyLabel} has been disabled after ${this.maxFailuresBeforeDisable} failures. ` +
-        `It will be re-enabled after ${this.reEnableAfterMinutes} minutes.`,
+        `${keyLabel} IMMEDIATELY DISABLED due to API key error: ${error?.message || 'Unknown'}. ` +
+        `Will be re-enabled after ${this.reEnableAfterMinutes} minutes.`,
       );
+    } else {
+      // For other errors, use failure count threshold
+      currentKey.failureCount++;
+      currentKey.lastFailure = new Date();
+
+      this.logger.warn(
+        `${keyLabel} failed (${currentKey.failureCount}/${this.maxFailuresBeforeDisable} failures). Error: ${error?.message || 'Unknown'}`,
+      );
+
+      // Disable key if it has failed too many times
+      if (currentKey.failureCount >= this.maxFailuresBeforeDisable) {
+        currentKey.isDisabled = true;
+        this.logger.error(
+          `${keyLabel} has been disabled after ${this.maxFailuresBeforeDisable} failures. ` +
+          `It will be re-enabled after ${this.reEnableAfterMinutes} minutes.`,
+        );
+      }
     }
 
-    // Rotate to next key
+    // Always rotate to next key
     this.rotateToNextKey();
   }
 

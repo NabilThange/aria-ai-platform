@@ -8,11 +8,13 @@ interface MessageGroupProps {
   group: GroupedMessages;
   taskStatus: TaskStatus;
   messageIdToIndex: Record<string, number>;
+  taskId?: string;
+  isAwaitingPlanApproval?: boolean;
 }
 
-export function MessageGroup({ group, taskStatus, messageIdToIndex }: MessageGroupProps) {
+export function MessageGroup({ group, taskStatus, messageIdToIndex, taskId, isAwaitingPlanApproval }: MessageGroupProps) {
   if (group.role === Role.ASSISTANT) {
-    return <AssistantMessage group={group} taskStatus={taskStatus} messageIdToIndex={messageIdToIndex} />;
+    return <AssistantMessage group={group} taskStatus={taskStatus} messageIdToIndex={messageIdToIndex} taskId={taskId} isAwaitingPlanApproval={isAwaitingPlanApproval} />;
   }
 
   return <UserMessage group={group} messageIdToIndex={messageIdToIndex} />;

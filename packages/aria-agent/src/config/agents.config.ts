@@ -17,7 +17,7 @@ export const AGENT_MODELS = {
   },
   WEB: {
     provider: 'google',
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-3.1-flash-lite-preview',
     description: 'Loops 15-20x, PinchTab gives structured text',
   },
   DESKTOP: {
@@ -46,6 +46,11 @@ export const AGENT_MODELS = {
     provider: 'groq',
     model: 'openai/gpt-oss-20b',
     description: 'Reads state, writes summary - zero reasoning',
+  },
+  WORKFLOW: {
+    provider: 'groq',
+    model: 'openai/gpt-oss-20b',
+    description: 'Executes pre-built workflows, fast execution',
   },
 } as const;
 

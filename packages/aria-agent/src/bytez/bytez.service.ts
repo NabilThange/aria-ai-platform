@@ -17,6 +17,8 @@ import {
 import { Message, Role } from '@prisma/client';
 import { v4 as uuid } from 'uuid';
 import { BytezKeyManagerService } from './bytez-key-manager.service';
+import { MockLlmService } from '../mock/mock-llm.service';
+
 
 const DEFAULT_MODEL_NAME = 'anthropic/claude-haiku-4-5';
 
@@ -28,6 +30,7 @@ export class BytezService implements BytebotAgentService {
   constructor(
     private readonly configService: ConfigService,
     private readonly keyManager: BytezKeyManagerService,
+    private readonly mockLlmService: MockLlmService,
   ) {
     const totalKeys = this.keyManager.getTotalKeys();
     if (totalKeys === 0) {
@@ -45,7 +48,12 @@ export class BytezService implements BytebotAgentService {
     model: string = DEFAULT_MODEL_NAME,
     useTools: boolean = true,
     signal?: AbortSignal,
+    customTools?: any[], // Allow passing custom tools
   ): Promise<BytebotAgentResponse> {
+    if (this.mockLlmService.isMockTask(messages)) {
+      return this.mockLlmService.handleMockTask(systemPrompt, messages, model);
+    }
+
     this.logger.log(`🔌 [BytezService] API call initiated`);
     this.logger.log(`   Model: ${model}`);
     this.logger.log(`   Use Tools: ${useTools}`);
@@ -87,13 +95,16 @@ export class BytezService implements BytebotAgentService {
           max_tokens: 8192,
         };
 
+        // Use custom tools if provided, otherwise use default tools
+        const tools = customTools || (useNativeAnthropicEndpoint ? this.getAnthropicTools() : this.getComputerUseTools());
+
         // Configure request based on endpoint type
         if (useNativeAnthropicEndpoint) {
           // Native Anthropic endpoint: Use params object for tools
           if (useTools) {
             requestBody.params = {
               max_tokens: 8192,
-              tools: this.getAnthropicTools(),
+              tools: tools,
               tool_choice: { type: 'auto' },
             };
           }
@@ -101,7 +112,7 @@ export class BytezService implements BytebotAgentService {
         } else if (useTools) {
           // OpenAI-compatible endpoint: Use top-level tools
           requestBody.model = model;
-          requestBody.tools = this.getComputerUseTools();
+          requestBody.tools = tools;
           requestBody.tool_choice = 'auto';
         }
 

@@ -1,0 +1,150 @@
+#!/bin/bash
+
+# Send email via N8N webhook
+# This script is pre-installed in the ARIA desktop environment
+# Usage: aria-mail --to "email@example.com" --subject "Subject" --body "Body text"
+# With attachment: aria-mail --to "email@example.com" --subject "Subject" --body "Body" --attachment "/path/to/file.txt"
+
+# N8N webhook URL (hidden from user)
+WEBHOOK_URL="https://n8n-render-tpfk.onrender.com/webhook/send-email-api"
+
+# Default values
+TO=""
+SUBJECT=""
+BODY=""
+CC=""
+BCC=""
+SENDER_NAME="Aria"
+BUTTON_TEXT=""
+BUTTON_URL=""
+ATTACHMENT_PATH=""
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --to)
+      TO="$2"
+      shift 2
+      ;;
+    --subject)
+      SUBJECT="$2"
+      shift 2
+      ;;
+    --body)
+      BODY="$2"
+      shift 2
+      ;;
+    --cc)
+      CC="$2"
+      shift 2
+      ;;
+    --bcc)
+      BCC="$2"
+      shift 2
+      ;;
+    --sender-name)
+      SENDER_NAME="$2"
+      shift 2
+      ;;
+    --button-text)
+      BUTTON_TEXT="$2"
+      shift 2
+      ;;
+    --button-url)
+      BUTTON_URL="$2"
+      shift 2
+      ;;
+    --attachment)
+      ATTACHMENT_PATH="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
+
+# Validate required fields
+if [ -z "$TO" ] || [ -z "$SUBJECT" ] || [ -z "$BODY" ]; then
+  echo "Error: --to, --subject, and --body are required"
+  echo "Usage: aria-mail --to \"email@example.com\" --subject \"Subject\" --body \"Body text\""
+  exit 1
+fi
+
+# Handle attachment if provided
+ATTACHMENTS_JSON="[]"
+if [ -n "$ATTACHMENT_PATH" ]; then
+  # Check file exists
+  if [ ! -f "$ATTACHMENT_PATH" ]; then
+    echo "Error: File not found: $ATTACHMENT_PATH"
+    exit 1
+  fi
+
+  # Get filename
+  FILENAME=$(basename "$ATTACHMENT_PATH")
+
+  # Get mime type based on extension
+  EXT="${FILENAME##*.}"
+  case "$EXT" in
+    txt)  MIME_TYPE="text/plain" ;;
+    pdf)  MIME_TYPE="application/pdf" ;;
+    png)  MIME_TYPE="image/png" ;;
+    jpg|jpeg) MIME_TYPE="image/jpeg" ;;
+    csv)  MIME_TYPE="text/csv" ;;
+    zip)  MIME_TYPE="application/zip" ;;
+    *)    MIME_TYPE="application/octet-stream" ;;
+  esac
+
+  # Convert file to base64
+  echo "Encoding attachment: $FILENAME..."
+  BASE64_CONTENT=$(base64 -w 0 "$ATTACHMENT_PATH")
+
+  # Build attachments JSON
+  ATTACHMENTS_JSON="[{\"filename\": \"$FILENAME\", \"content\": \"$BASE64_CONTENT\", \"mimeType\": \"$MIME_TYPE\"}]"
+
+  echo "Attachment ready: $FILENAME ($MIME_TYPE)"
+fi
+
+# Build JSON payload using jq for safe encoding (handles special chars in body)
+JSON_PAYLOAD=$(jq -n \
+  --arg to "$TO" \
+  --arg subject "$SUBJECT" \
+  --arg body "$BODY" \
+  --arg cc "$CC" \
+  --arg bcc "$BCC" \
+  --arg senderName "$SENDER_NAME" \
+  --arg buttonText "$BUTTON_TEXT" \
+  --arg buttonUrl "$BUTTON_URL" \
+  --argjson attachments "$ATTACHMENTS_JSON" \
+  '{
+    to: $to,
+    subject: $subject,
+    body: $body,
+    cc: $cc,
+    bcc: $bcc,
+    senderName: $senderName,
+    buttonText: $buttonText,
+    buttonUrl: $buttonUrl,
+    attachments: $attachments
+  }')
+
+# Send request to N8N webhook
+echo "Sending email to $TO..."
+RESPONSE=$(curl -s -X POST "$WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -d "$JSON_PAYLOAD" \
+  -w "\nHTTP_STATUS:%{http_code}")
+
+# Extract HTTP status
+HTTP_STATUS=$(echo "$RESPONSE" | grep -o "HTTP_STATUS:[0-9]*" | cut -d: -f2)
+
+# Check if successful
+if [ "$HTTP_STATUS" = "200" ]; then
+  echo "✅ Email sent successfully!"
+  exit 0
+else
+  echo "❌ Failed to send email (HTTP $HTTP_STATUS)"
+  echo "$RESPONSE"
+  exit 1
+fi

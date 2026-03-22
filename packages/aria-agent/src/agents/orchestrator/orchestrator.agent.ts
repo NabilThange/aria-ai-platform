@@ -11,6 +11,8 @@ import { extractJSON } from '../../utils/json.util';
 import { MessagesService } from '../../messages/messages.service';
 import { AgentsService } from '../agents.service';
 import { BrowserLoggerService } from '../../logger/browser-logger.service';
+import { WorkflowService } from '../../services/workflow.service';
+import { workflowTools } from '../../groq/workflow.tools';
 
 /**
  * OrchestratorAgent - Creates and manages execution plans
@@ -29,6 +31,7 @@ export class OrchestratorAgent extends BaseAgent {
     private readonly messagesService: MessagesService,
     private readonly agentsService: AgentsService,
     private readonly browserLogger: BrowserLoggerService,
+    private readonly workflowService: WorkflowService,
   ) {
     super(sharedState, 'OrchestratorAgent');
   }
@@ -92,7 +95,8 @@ export class OrchestratorAgent extends BaseAgent {
           },
         ] as any,
         modelConfig.model,
-        false, // No tools needed
+        true, // Enable tools for workflow discovery
+        taskId, // Pass taskId for tool execution
       );
 
       // LOG AGENT RESPONSE TO BROWSER
@@ -274,6 +278,7 @@ export class OrchestratorAgent extends BaseAgent {
     messages: any[],
     model: string,
     useTools: boolean,
+    taskId?: string,
   ): Promise<any> {
     // Determine provider from model string
     // Groq models: openai/gpt-oss-*, meta-llama/llama-*
@@ -284,22 +289,184 @@ export class OrchestratorAgent extends BaseAgent {
       model.startsWith('openai/') ||
       model.startsWith('meta-llama/');
     
+    let response: any;
+    
+    // Import workflow tools for orchestrator
+    const { workflowTools } = await import('../../groq/workflow.tools');
+    
     if (isGroqModel) {
       this.logger.log(`🔧 Using Groq service for model: ${model}`);
-      return await this.groqService.generateMessage(
+      response = await this.groqService.generateMessage(
         systemPrompt,
         messages,
         model,
         useTools,
+        undefined, // No abort signal
+        workflowTools, // Pass workflow tools
       );
     } else {
       this.logger.log(`🔧 Using Bytez service for model: ${model}`);
-      return await this.bytezService.generateMessage(
+      response = await this.bytezService.generateMessage(
         systemPrompt,
         messages,
         model,
         useTools,
+        undefined, // No abort signal
+        workflowTools, // Pass workflow tools
       );
+    }
+    
+    // Handle tool calls if present
+    // Extract tool calls from contentBlocks
+    const toolCalls = response.contentBlocks
+      ?.filter((block: any) => block.type === 'tool_use')
+      .map((block: any) => ({
+        id: block.id,
+        name: block.name,
+        input: block.input,
+      })) || [];
+    
+    if (useTools && toolCalls.length > 0 && taskId) {
+      this.logger.log(`🔧 Processing ${toolCalls.length} tool calls...`);
+      
+      // Execute all tool calls
+      const toolResults = await Promise.all(
+        toolCalls.map(async (toolCall: any) => {
+          // Log tool call to browser UI
+          this.browserLogger.logToolCall(taskId, 'ORCHESTRATOR', {
+            name: toolCall.name,
+            input: toolCall.input,
+          });
+          
+          const startTime = Date.now();
+          let result: any;
+          let success = true;
+          let error: string | undefined;
+          
+          try {
+            result = await this.executeToolCall(toolCall, taskId);
+          } catch (err: any) {
+            success = false;
+            error = err.message;
+            result = null;
+          }
+          
+          const duration = Date.now() - startTime;
+          
+          // Log tool result to browser UI
+          this.browserLogger.logToolResult(taskId, 'ORCHESTRATOR', {
+            toolName: toolCall.name,
+            success,
+            output: result,
+            error,
+            duration,
+          });
+          
+          if (!success) {
+            throw new Error(error);
+          }
+          
+          return result;
+        })
+      );
+      
+      // Add tool results to conversation and call model again
+      // Format messages according to Anthropic/Bytez format (will be converted by service)
+      const toolMessages = toolCalls.map((toolCall: any) => ({
+        role: 'ASSISTANT',
+        content: [
+          {
+            type: 'tool_use',
+            id: toolCall.id,
+            name: toolCall.name,
+            input: toolCall.input,
+          },
+        ],
+      }));
+      
+      const resultMessages = toolResults.map((result: any, index: number) => ({
+        role: 'USER',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: toolCalls[index].id,
+            content: [{ type: 'text', text: JSON.stringify(result) }],
+          },
+        ],
+      }));
+      
+      // Recursive call with tool results
+      const updatedMessages = [...messages, ...toolMessages, ...resultMessages];
+      return await this.callModelService(systemPrompt, updatedMessages, model, useTools, taskId);
+    }
+    
+    return response;
+  }
+  
+  /**
+   * Execute a tool call from the LLM
+   */
+  private async executeToolCall(toolCall: any, taskId: string): Promise<any> {
+    const { name, input } = toolCall;
+    
+    this.logger.log(`🔧 Executing tool: ${name}`);
+    this.logger.debug(`   Input: ${JSON.stringify(input)}`);
+    
+    try {
+      switch (name) {
+        case 'list_workflows':
+          const workflows = await this.workflowService.listWorkflows();
+          this.logger.log(`   Found ${workflows.length} workflows`);
+          
+          // Calculate total size of workflow descriptions
+          const workflowsJson = JSON.stringify(workflows);
+          const estimatedTokens = Math.ceil(workflowsJson.length / 4); // Rough token estimate
+          
+          this.logger.log(`\n${'='.repeat(80)}`);
+          this.logger.log(`[WORKFLOW LIST SIZE ANALYSIS]`);
+          this.logger.log(`${'='.repeat(80)}`);
+          this.logger.log(`📊 Workflow Data Size:`);
+          this.logger.log(`   Total workflows: ${workflows.length}`);
+          this.logger.log(`   JSON size: ${(workflowsJson.length / 1024).toFixed(2)} KB`);
+          this.logger.log(`   Estimated tokens: ~${estimatedTokens.toLocaleString()}`);
+          this.logger.log(`\n📋 Individual Workflow Sizes:`);
+          
+          workflows.forEach((w, i) => {
+            const wJson = JSON.stringify(w);
+            const wTokens = Math.ceil(wJson.length / 4);
+            this.logger.log(`   ${i + 1}. ${w.name}: ${wTokens} tokens (${(wJson.length / 1024).toFixed(2)} KB)`);
+          });
+          
+          this.logger.log(`\n⚠️  CONTEXT IMPACT:`);
+          if (estimatedTokens > 5000) {
+            this.logger.warn(`   ⚠️  LARGE PAYLOAD: ${estimatedTokens} tokens will be added to next LLM call`);
+          } else if (estimatedTokens > 2000) {
+            this.logger.warn(`   ⚠️  MODERATE PAYLOAD: ${estimatedTokens} tokens (may approach TPM limits)`);
+          } else {
+            this.logger.log(`   ✅ SAFE PAYLOAD: ${estimatedTokens} tokens (within safe limits)`);
+          }
+          this.logger.log(`${'='.repeat(80)}\n`);
+          
+          // Return the full workflows array to prevent the need for additional tool calls
+          return workflows;
+          
+        case 'use_workflow':
+          // Store workflow usage intent - will be included in execution plan
+          this.logger.log(`   Workflow "${input.name}" will be added to execution plan`);
+          return {
+            success: true,
+            message: `Workflow "${input.name}" will be executed with variables: ${JSON.stringify(input.variables)}`,
+            workflow_name: input.name,
+            workflow_vars: input.variables,
+          };
+          
+        default:
+          this.logger.warn(`   Unknown tool: ${name}`);
+          return { error: `Unknown tool: ${name}` };
+      }
+    } catch (error) {
+      this.logger.error(`   Tool execution failed: ${error.message}`);
+      return { error: error.message };
     }
   }
 
@@ -479,19 +646,28 @@ Respond with JSON only, following the exact schema in the system prompt.`;
         }
         
         // Validate type is correct
-        if (stepType !== 'web' && stepType !== 'desktop') {
+        if (stepType !== 'web' && stepType !== 'desktop' && stepType !== 'workflow') {
           this.logger.warn(`⚠️  Step ${i + 1} has invalid type "${stepType}" - defaulting to 'desktop'`);
           stepType = 'desktop';
         }
         
-        return {
+        // Build base step
+        const step: ExecutionStep = {
           id: s.id || s.step || `step_${i + 1}`,
-          type: stepType as 'web' | 'desktop',
+          type: stepType as 'web' | 'desktop' | 'workflow',
           description: s.description || s.action || '',
           success_criteria: s.success_criteria || s.expected_outcome || s.expected_output || '',
           context: s.context || s.fallback || '',
           depends_on: s.depends_on || [],
         };
+        
+        // Add workflow-specific fields if this is a workflow step
+        if (stepType === 'workflow') {
+          step.workflow_name = s.workflow_name;
+          step.workflow_vars = s.workflow_vars || s.variables || {};
+        }
+        
+        return step;
       });
 
       const plan: ExecutionPlan = {

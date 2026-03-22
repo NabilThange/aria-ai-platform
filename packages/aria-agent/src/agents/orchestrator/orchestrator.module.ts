@@ -8,6 +8,7 @@ import { MessagesModule } from '../../messages/messages.module';
 import { AgentModule } from '../../agent/agent.module';
 import { BrowserLoggerService } from '../../logger/browser-logger.service';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ServicesModule } from '../../services/services.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
     GroqModule,
     AgentRegistryModule,
     EventEmitterModule,
+    ServicesModule,
     forwardRef(() => MessagesModule),
     forwardRef(() => AgentModule),
   ],

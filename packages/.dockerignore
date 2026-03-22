@@ -31,8 +31,6 @@
 
 # Lock files - KEEP package-lock.json for ariad
 **/yarn.lock
-aria-agent/package-lock.json
-aria-ui/package-lock.json
 
 # Test coverage
 **/coverage
@@ -51,11 +49,3 @@ aria-ui/package-lock.json
 **/*.md
 !**/SKILL.md
 !**/AGENTS.md
-
-# Exclude other packages when building ariad
-aria-agent
-aria-ui
-
-# Keep only what's needed
-!ariad
-!shared

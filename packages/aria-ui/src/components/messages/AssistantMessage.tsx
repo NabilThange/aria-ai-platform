@@ -10,12 +10,16 @@ interface AssistantMessageProps {
   group: GroupedMessages;
   taskStatus: TaskStatus;
   messageIdToIndex: Record<string, number>;
+  taskId?: string;
+  isAwaitingPlanApproval?: boolean;
 }
 
 export function AssistantMessage({
   group,
   taskStatus,
   messageIdToIndex,
+  taskId,
+  isAwaitingPlanApproval = false,
 }: AssistantMessageProps) {
   return (
     <div className={
@@ -79,6 +83,8 @@ export function AssistantMessage({
                 <MessageContent
                   content={message.content}
                   isTakeOver={message.take_over}
+                  taskId={taskId}
+                  isAwaitingPlanApproval={isAwaitingPlanApproval}
                 />
               </div>
             ))}
@@ -126,6 +132,8 @@ export function AssistantMessage({
               <MessageContent
                 content={message.content}
                 isTakeOver={message.take_over}
+                taskId={taskId}
+                isAwaitingPlanApproval={isAwaitingPlanApproval}
               />
             </div>
           ))}

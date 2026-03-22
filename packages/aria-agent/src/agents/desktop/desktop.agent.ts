@@ -28,7 +28,7 @@ import { BrowserLoggerService } from '../../logger/browser-logger.service';
 export class DesktopAgent extends BaseAgent {
   private readonly model = AGENT_MODELS.DESKTOP;
   private readonly MAX_ITERATIONS = 20;
-  private readonly DESKTOP_BASE_URL = process.env.ARIA_DESKTOP_BASE_URL || 'http://localhost:3001';
+  private readonly DESKTOP_BASE_URL = process.env.ARIA_DESKTOP_BASE_URL || 'http://localhost:9990';
 
   constructor(
     sharedState: SharedStateService,

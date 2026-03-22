@@ -215,4 +215,21 @@ export class TasksController {
   async skipClarification(@Param('id') taskId: string) {
     return this.tasksService.skipClarification(taskId);
   }
+
+  @Post(':id/approve-plan')
+  @HttpCode(HttpStatus.OK)
+  async approvePlan(
+    @Param('id') taskId: string,
+    @Body() body: { approvedPlan: any[] },
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      await this.tasksService.approvePlan(taskId, body.approvedPlan);
+      return { success: true, message: 'Plan approved - execution resumed' };
+    } catch (error) {
+      throw new HttpException(
+        { success: false, message: error.message },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }

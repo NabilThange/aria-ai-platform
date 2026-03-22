@@ -11,6 +11,8 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { SummariesModule } from './summaries/summaries.modue';
 import { LoggerModule } from 'nestjs-pino';
 import { pinoLoggerConfig } from './logger/logger.config';
+import { WorkflowsModule } from './workflows/workflows.module';
+import { MockLlmModule } from './mock/mock-llm.module';
 // import { FirebaseModule } from './firebase/firebase.module'; // Disabled for deployment
 
 @Module({
@@ -26,7 +28,9 @@ import { pinoLoggerConfig } from './logger/logger.config';
     TasksModule,
     MessagesModule,
     SummariesModule,
+    WorkflowsModule,
     PrismaModule,
+    MockLlmModule,
   ],
   controllers: [AppController],
   providers: [AppService],

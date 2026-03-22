@@ -2,12 +2,11 @@ name: aria
 
 services:
   aria-desktop:
-    # Build from source
+    # Build from source locally
     build:
       context: ../packages/
       dockerfile: ariad/Dockerfile
-    # Use pre-built image (commented out - build from source)
-    # image: ghcr.io/aria-ai/aria-desktop:edge
+    image: aria-desktop:local
     shm_size: "2g"
     container_name: aria-desktop
     restart: unless-stopped
@@ -57,8 +56,7 @@ services:
     build:
       context: ../packages/
       dockerfile: aria-agent/Dockerfile
-    # Use pre-built image
-    image: ghcr.io/aria-ai/aria-agent:edge
+    image: aria-agent:local
     container_name: aria-agent
     restart: unless-stopped
     ports:
@@ -68,9 +66,46 @@ services:
       - ARIA_DESKTOP_BASE_URL=${ARIA_DESKTOP_BASE_URL:-http://aria-desktop:9990}
       - PINCHTAB_BASE_URL=${PINCHTAB_BASE_URL:-http://aria-desktop:9867}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - ENABLE_MULTI_AGENT=${ENABLE_MULTI_AGENT:-true}
+      # Groq API Keys (Key Manager - automatic fallback)
+      - GROQ_API_KEY_1=${GROQ_API_KEY_1}
+      - GROQ_API_KEY_2=${GROQ_API_KEY_2}
+      - GROQ_API_KEY_3=${GROQ_API_KEY_3}
+      - GROQ_API_KEY_4=${GROQ_API_KEY_4}
+      - GROQ_API_KEY_5=${GROQ_API_KEY_5}
+      # Google API Keys (Key Manager - automatic fallback)
+      - GOOGLE_API_KEY_1=${GOOGLE_API_KEY_1}
+      - GOOGLE_API_KEY_2=${GOOGLE_API_KEY_2}
+      - GOOGLE_API_KEY_3=${GOOGLE_API_KEY_3}
+      - GOOGLE_API_KEY_4=${GOOGLE_API_KEY_4}
+      - GOOGLE_API_KEY_5=${GOOGLE_API_KEY_5}
+      # Bytez API Keys (Key Manager - automatic fallback)
+      - BYTEZ_API_KEY_1=${BYTEZ_API_KEY_1}
+      - BYTEZ_API_KEY_2=${BYTEZ_API_KEY_2}
+      - BYTEZ_API_KEY_3=${BYTEZ_API_KEY_3}
+      - BYTEZ_API_KEY_4=${BYTEZ_API_KEY_4}
+      - BYTEZ_API_KEY_5=${BYTEZ_API_KEY_5}
+      - BYTEZ_API_KEY_6=${BYTEZ_API_KEY_6}
+      - BYTEZ_API_KEY_7=${BYTEZ_API_KEY_7}
+      - BYTEZ_API_KEY_8=${BYTEZ_API_KEY_8}
+      - BYTEZ_API_KEY_9=${BYTEZ_API_KEY_9}
+      - BYTEZ_API_KEY_10=${BYTEZ_API_KEY_10}
+      - BYTEZ_API_KEY_11=${BYTEZ_API_KEY_11}
+      - BYTEZ_API_KEY_12=${BYTEZ_API_KEY_12}
+      - BYTEZ_API_KEY_13=${BYTEZ_API_KEY_13}
+      - BYTEZ_API_KEY_14=${BYTEZ_API_KEY_14}
+      - BYTEZ_API_KEY_15=${BYTEZ_API_KEY_15}
+      - BYTEZ_API_KEY_16=${BYTEZ_API_KEY_16}
+      - BYTEZ_API_KEY_17=${BYTEZ_API_KEY_17}
+      - BYTEZ_API_KEY_18=${BYTEZ_API_KEY_18}
+      - BYTEZ_API_KEY_19=${BYTEZ_API_KEY_19}
+      - BYTEZ_API_KEY_20=${BYTEZ_API_KEY_20}
+      # Optional
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - PINCHTAB_HEADED_MODE=${PINCHTAB_HEADED_MODE}
     depends_on:
       - postgres
       - redis
@@ -82,11 +117,12 @@ services:
     build:
       context: ../packages/
       dockerfile: aria-ui/Dockerfile
+      cache_from:
+        - aria-ui:local
       args:
         - ARIA_AGENT_BASE_URL=${ARIA_AGENT_BASE_URL:-http://aria-agent:9991}
         - ARIA_DESKTOP_VNC_URL=${ARIA_DESKTOP_VNC_URL:-http://aria-desktop:9990/websockify}
-    # Use pre-built image
-    image: ghcr.io/aria-ai/aria-ui:edge
+    image: aria-ui:local
     container_name: aria-ui
     restart: unless-stopped
     ports:

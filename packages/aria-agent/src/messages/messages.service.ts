@@ -58,8 +58,8 @@ export class MessagesService {
    */
   async createAgentActionMessage(
     taskId: string,
-    agentName: 'CLARIFIER' | 'ORCHESTRATOR' | 'WEB' | 'DESKTOP' | 'PERCEPTION' | 'VERIFIER' | 'RECOVERY' | 'REPORTER',
-    actionType: 'thinking' | 'plan' | 'verify' | 'question' | 'recovery' | 'report' | 'computer_action',
+    agentName: 'CLARIFIER' | 'ORCHESTRATOR' | 'WEB' | 'DESKTOP' | 'WORKFLOW' | 'PERCEPTION' | 'VERIFIER' | 'RECOVERY' | 'REPORTER',
+    actionType: 'thinking' | 'plan' | 'verify' | 'question' | 'recovery' | 'report' | 'computer_action' | 'workflow_execution',
     actionData: any,
   ): Promise<Message> {
     const timestamp = new Date().toISOString();

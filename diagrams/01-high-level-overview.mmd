@@ -1,0 +1,68 @@
+graph TB
+    subgraph "🌐 FRONTEND - Next.js UI"
+        A[👤 User Input<br/>Task Description + Files]
+        B[📱 React Components<br/>TasksPage, AgentStatus]
+        C[🔌 WebSocket Client<br/>Socket.IO]
+        D[📊 Real-time Display<br/>Agent Status, VNC Stream]
+    end
+    
+    subgraph "🔄 API LAYER"
+        E[🚪 API Proxy<br/>route.ts]
+        F[🎯 Tasks Controller<br/>POST /tasks, GET /tasks/:id]
+    end
+    
+    subgraph "🧠 BACKEND - NestJS"
+        G[(💾 PostgreSQL<br/>Tasks, Messages, Files)]
+        H[(🔴 Redis<br/>Shared State<br/>task:taskId:key)]
+        I[⚡ Tasks Gateway<br/>WebSocket Server]
+        J[🎭 Orchestration Service<br/>Sequential Pipeline]
+    end
+    
+    subgraph "🤖 AGENT LAYER"
+        K[🔍 CLARIFIER<br/>Groq GPT-OSS-20B]
+        L[📋 ORCHESTRATOR<br/>Bytez Claude Opus 4.6]
+        M[🌐 WEB AGENT<br/>Google Gemini 3 Flash]
+        N[🖥️ DESKTOP AGENT<br/>Bytez Claude Sonnet 4.6]
+        O[👁️ PERCEPTION<br/>Groq Llama-4-Scout]
+        P[✅ VERIFIER<br/>Groq GPT-OSS-20B]
+        Q[🔄 RECOVERY<br/>Bytez Claude Sonnet 4.6]
+        R[📝 REPORTER<br/>Groq GPT-OSS-20B]
+    end
+    
+    subgraph "🛠️ EXTERNAL SERVICES"
+        S[🌐 PinchTab<br/>localhost:9867<br/>Browser Automation]
+        T[🖥️ VNC Desktop<br/>localhost:9990<br/>Ubuntu 22.04]
+        U[📦 Workflows<br/>google-search<br/>take-screenshot]
+    end
+    
+    A --> B --> E --> F
+    F --> G
+    F --> H
+    F --> I
+    I --> C --> D
+    F --> J
+    J --> K --> L
+    L --> M & N
+    M --> S
+    N --> T
+    N --> O
+    M --> P
+    N --> P
+    P --> Q
+    L --> U
+    J --> R
+    
+    style A fill:#FFE6CC,stroke:#D79B00,stroke-width:3px
+    style J fill:#E1D5E7,stroke:#9673A6,stroke-width:3px
+    style K fill:#FFF2CC,stroke:#D6B656,stroke-width:2px
+    style L fill:#D5E8D4,stroke:#82B366,stroke-width:2px
+    style M fill:#DAE8FC,stroke:#6C8EBF,stroke-width:2px
+    style N fill:#F8CECC,stroke:#B85450,stroke-width:2px
+    style O fill:#E1D5E7,stroke:#9673A6,stroke-width:2px
+    style P fill:#FFF2CC,stroke:#D6B656,stroke-width:2px
+    style Q fill:#FFE6CC,stroke:#D79B00,stroke-width:2px
+    style R fill:#D5E8D4,stroke:#82B366,stroke-width:2px
+    style G fill:#F5F5F5,stroke:#666666,stroke-width:2px
+    style H fill:#FFE6E6,stroke:#CC0000,stroke-width:2px
+    style S fill:#CCE5FF,stroke:#0066CC,stroke-width:2px
+    style T fill:#E6F2FF,stroke:#0052A3,stroke-width:2px

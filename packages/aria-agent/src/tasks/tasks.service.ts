@@ -546,4 +546,30 @@ export class TasksService {
       throw error;
     }
   }
+
+  async approvePlan(taskId: string, approvedPlan: any[]): Promise<void> {
+    this.logger.log(`Approving plan for task ${taskId} with ${approvedPlan.length} steps`);
+
+    // Verify task exists
+    const task = await this.findById(taskId);
+    if (!task) {
+      throw new NotFoundException(`Task with ID ${taskId} not found`);
+    }
+
+    // Verify task is awaiting plan approval
+    const status = await this.sharedStateService.get<string>(taskId, 'status');
+    if (status !== 'awaiting_plan_approval') {
+      throw new BadRequestException(`Task ${taskId} is not awaiting plan approval (current status: ${status})`);
+    }
+
+    try {
+      // Emit event to trigger execution with approved plan
+      this.eventEmitter.emit('plan.approved', { taskId, approvedPlan });
+
+      this.logger.log(`Plan approved for task ${taskId} - execution will resume`);
+    } catch (error) {
+      this.logger.error(`Error approving plan for task ${taskId}:`, error);
+      throw error;
+    }
+  }
 }
