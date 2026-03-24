@@ -1,7 +1,7 @@
 # ARIA Multi-Agent System - Complete Architecture
 
 **Generated:** March 18, 2026  
-**Last Updated:** March 21, 2026 - Added PinchTab Authentication Token Support  
+**Last Updated:** March 23, 2026 - Added Textarea Component & Fixed Hugeicons Imports  
 **Purpose:** Complete frontend-backend flow with exact tools, inputs, outputs, and context sources
 
 ---
@@ -1898,6 +1898,32 @@ task_deleted(taskId: string)
 ---
 
 ## Frontend Components
+
+### UI Component Library
+
+**Location:** `packages/aria-ui/src/components/ui/`
+
+The project uses shadcn/ui components built on Radix UI primitives with Tailwind CSS 4. All components follow a consistent design system with the custom bronze color palette.
+
+**Available Components:**
+- `button.tsx` - Button with variants (default, destructive, outline, secondary, ghost, link)
+- `input.tsx` - Text input field
+- `textarea.tsx` - Multi-line text input (added March 23, 2026)
+- `label.tsx` - Form labels
+- `select.tsx` - Dropdown select
+- `dialog.tsx` - Modal dialogs
+- `card.tsx` - Content cards
+- `badge.tsx` - Status badges
+- `switch.tsx` - Toggle switches
+- `scroll-area.tsx` - Scrollable containers
+- `separator.tsx` - Visual dividers
+- `popover.tsx` - Floating popovers
+- `dropdown-menu.tsx` - Context menus
+
+**Icon Library:** Hugeicons (free version)
+- Import from `@hugeicons/core-free-icons`
+- Render with `<HugeiconsIcon icon={IconName} />`
+- Note: Some icon names differ from paid version (e.g., `KeyboardIcon` not `Keyboard01Icon`, `PlayIcon` not `Play01Icon`, `Loading02Icon` not `Loader02Icon`, `ComputerTerminal01Icon` not `Terminal01Icon`, `AppStoreIcon` not `ApplicationIcon`)
 
 ### useAgentStatus Hook
 
@@ -4145,6 +4171,283 @@ When implementing features that require frontend-backend coordination:
 
 ---
 
+### Fix: API Proxy Header Forwarding Issue (March 23, 2026)
+
+**Problem:** Frontend requests to `/api/proxy/tasks` were failing with errors in `apiRequest()` even though direct curl requests to `http://localhost:9991/tasks` worked perfectly. The proxy was returning responses but the frontend couldn't parse them.
+
+**Root Cause:** The Next.js API proxy route (`packages/aria-ui/src/app/api/proxy/[[...path]]/route.ts`) was hardcoding `Content-Type: application/json` for both requests and responses, regardless of what the backend actually returned. This caused:
+1. Non-JSON responses from backend to fail parsing in the frontend
+2. Important request/response headers to be stripped
+3. Error responses with different content types to be mishandled
+
+**The Fix:**
+
+**1. Forward All Headers (Except Hop-by-Hop)**
+
+Changed from hardcoded headers to forwarding all headers from both request and response:
+
+```typescript
+// BEFORE:
+const init: RequestInit = {
+  method: req.method,
+  headers: {
+    "Content-Type": "application/json",
+    ...(cookies && { Cookie: cookies }),
+  },
+  body: ...
+};
+
+// AFTER:
+const forwardHeaders = new Headers();
+const hopByHopHeaders = new Set([
+  'connection', 'keep-alive', 'transfer-encoding', 
+  'te', 'trailer', 'proxy-authorization', 'proxy-authenticate', 'upgrade'
+]);
+
+req.headers.forEach((value, key) => {
+  if (!hopByHopHeaders.has(key.toLowerCase())) {
+    forwardHeaders.set(key, value);
+  }
+});
+
+const init: RequestInit = {
+  method: req.method,
+  headers: forwardHeaders,
+  body: ...
+};
+```
+
+**2. Preserve Backend Response Headers**
+
+Changed from hardcoded response headers to forwarding actual backend headers:
+
+```typescript
+// BEFORE:
+const responseHeaders = new Headers({
+  "Content-Type": "application/json",
+});
+
+// AFTER:
+const responseHeaders = new Headers();
+res.headers.forEach((value, key) => {
+  if (!hopByHopHeaders.has(key.toLowerCase())) {
+    responseHeaders.set(key, value);
+  }
+});
+```
+
+**3. Improved Error Handling**
+
+Added distinction between network errors and application errors:
+
+```typescript
+// BEFORE:
+return new Response(
+  JSON.stringify({ error: "Failed to proxy request" }),
+  { status: 500, headers: { "Content-Type": "application/json" } }
+);
+
+// AFTER:
+const isNetworkError = errorMessage.includes("fetch failed") || 
+                      errorMessage.includes("ECONNREFUSED") ||
+                      errorMessage.includes("ETIMEDOUT");
+
+return new Response(
+  JSON.stringify({ 
+    error: "Failed to proxy request",
+    details: errorMessage,
+    type: isNetworkError ? "network_error" : "proxy_error",
+    backendUrl: url
+  }),
+  {
+    status: isNetworkError ? 503 : 500,
+    headers: { "Content-Type": "application/json" }
+  }
+);
+```
+
+**4. Enhanced Frontend Error Logging**
+
+Added response body logging to `apiRequest()` for better debugging:
+
+```typescript
+if (!response.ok) {
+  const errorBody = await response.text();
+  logger.error(
+    { event: 'api.request_failed', endpoint, status: response.status, body: errorBody },
+    `API request failed: ${response.status} ${response.statusText}`
+  );
+  throw new Error(...);
+}
+```
+
+**Why This Matters:**
+
+- **Content-Type Preservation:** Backend can return HTML error pages, plain text, or other formats - proxy now forwards the correct type
+- **Header Forwarding:** Authorization, cache control, CORS, and other important headers are now preserved
+- **Better Debugging:** Error responses include full details about what went wrong and where
+- **Network vs App Errors:** 503 for network issues (backend down) vs 500 for proxy errors
+
+**Files Changed:**
+- **Modified:** `packages/aria-ui/src/app/api/proxy/[[...path]]/route.ts` (header forwarding, error handling)
+- **Modified:** `packages/aria-ui/src/utils/taskUtils.ts` (enhanced error logging, fixed fetchModels to use proxy)
+
+**Testing:**
+1. Start backend: `cd packages/aria-agent && npm run start:dev`
+2. Start frontend: `cd packages/aria-ui && npm run dev`
+3. Navigate to tasks page
+4. **Verify:** No 404 errors in console
+5. **Verify:** Tasks load correctly
+6. **Verify:** Models dropdown populates
+7. Stop backend
+8. **Verify:** Frontend shows 503 network error (not 500)
+9. Restart backend
+10. **Verify:** Frontend reconnects and loads data
+
+---
+
+### Fix: Custom Server Express Middleware Conflict (March 23, 2026)
+
+**Problem:** After fixing the proxy route headers, the frontend was still failing with "Failed to parse JSON response" errors. Testing revealed that `/api/proxy/tasks?limit=5` was returning "Hello World!" (12 bytes, `text/html`) instead of proxying to the backend. Direct backend requests worked fine, but the Next.js proxy route wasn't being executed at all.
+
+**Root Cause:** The custom Express server in `packages/aria-ui/server.ts` had this line:
+
+```typescript
+expressApp.use("/api/proxy/tasks", tasksProxy);
+```
+
+This Express middleware intercepted ALL HTTP requests to `/api/proxy/tasks/*` BEFORE they could reach the Next.js API route handler. The `tasksProxy` middleware was configured to proxy to the backend's Socket.IO endpoint (`/socket.io`), not the REST API, causing it to return the Socket.IO HTTP polling response ("Hello World!") instead of task data.
+
+**The Request Flow (Broken):**
+
+```
+Browser → /api/proxy/tasks?limit=5
+    ↓
+Express middleware intercepts
+    ↓
+Proxies to http://localhost:9991/socket.io (Socket.IO HTTP endpoint)
+    ↓
+Returns "Hello World!" (Socket.IO polling response)
+    ↓
+Frontend tries to parse as JSON → FAILS
+```
+
+**The Fix:**
+
+Removed the Express HTTP middleware and let Next.js API routes handle regular HTTP requests. The WebSocket upgrade handler still works for Socket.IO connections.
+
+```typescript
+// BEFORE (server.ts):
+expressApp.use("/api/proxy/tasks", tasksProxy);
+
+// AFTER (server.ts):
+// DON'T apply HTTP proxy here - let Next.js API routes handle it
+// expressApp.use("/api/proxy/tasks", tasksProxy);
+```
+
+**The Request Flow (Fixed):**
+
+```
+Browser → /api/proxy/tasks?limit=5
+    ↓
+Express passes to Next.js (not intercepted)
+    ↓
+Next.js API route: /api/proxy/[[...path]]/route.ts
+    ↓
+Proxies to http://localhost:9991/tasks?limit=5
+    ↓
+Backend returns JSON task data
+    ↓
+Frontend parses successfully ✓
+```
+
+**WebSocket Flow (Still Works):**
+
+```
+Browser → WebSocket upgrade to /api/proxy/tasks
+    ↓
+server.on("upgrade") handler intercepts
+    ↓
+Proxies to http://localhost:9991/socket.io
+    ↓
+Socket.IO connection established ✓
+```
+
+**Additional Fixes:**
+
+**1. Handle 304 Not Modified Responses**
+
+The backend was returning `304 Not Modified` for cached requests, but the response body was empty. The frontend tried to parse the empty string as JSON and failed.
+
+```typescript
+// Added to apiRequest() in taskUtils.ts:
+if (response.status === 304) {
+  logger.debug({ event: 'api.cache_hit', endpoint }, `Using cached response for ${endpoint}`);
+  return null; // Browser cache will handle this
+}
+
+// Handle empty responses
+if (!bodyText || bodyText.trim() === '') {
+  logger.warn({ event: 'api.empty_response', endpoint }, `Empty response from ${endpoint}`);
+  return null;
+}
+```
+
+**2. Strip Cache Headers in Proxy**
+
+To avoid 304 responses with empty bodies, the proxy now strips cache validation headers before forwarding to the backend:
+
+```typescript
+// Added to proxy route:
+forwardHeaders.delete('if-none-match');
+forwardHeaders.delete('if-modified-since');
+```
+
+This ensures the proxy always gets fresh data (200 with body) instead of 304 (no body).
+
+**Why This Matters:**
+
+- **Separation of Concerns:** HTTP REST API requests go through Next.js API routes, WebSocket upgrades go through Express middleware
+- **Correct Endpoints:** REST API calls hit `/tasks`, Socket.IO calls hit `/socket.io`
+- **No Conflicts:** Express middleware doesn't intercept requests meant for Next.js
+- **Cache Handling:** 304 responses and empty bodies are handled gracefully
+
+**Files Changed:**
+- **Modified:** `packages/aria-ui/server.ts` (removed Express middleware for `/api/proxy/tasks`)
+- **Modified:** `packages/aria-ui/src/app/api/proxy/[[...path]]/route.ts` (strip cache headers)
+- **Modified:** `packages/aria-ui/src/utils/taskUtils.ts` (handle 304 and empty responses)
+
+**Testing:**
+1. Clear Next.js cache: `rm -rf packages/aria-ui/.next`
+2. Start backend: `cd packages/aria-agent && npm run start:dev`
+3. Start frontend: `cd packages/aria-ui && npm run dev`
+4. Test direct backend: `curl http://localhost:9991/tasks?limit=5` → Should return JSON
+5. Test proxy: `curl http://localhost:9992/api/proxy/tasks?limit=5` → Should return same JSON (not "Hello World!")
+6. Open browser to `http://localhost:9992`
+7. **Verify:** Tasks load without errors
+8. **Verify:** No "Failed to parse JSON" errors in console
+9. **Verify:** WebSocket connection still works (real-time updates)
+10. Check Next.js terminal for `[Proxy] Forwarding GET http://localhost:9991/tasks?limit=5` logs
+
+**Debugging Tips:**
+
+If you see "Hello World!" from the proxy:
+- The Express middleware is still intercepting requests
+- Check `server.ts` and ensure the `expressApp.use("/api/proxy/tasks", ...)` line is commented out
+- Restart the Next.js dev server
+
+If you see "Failed to parse JSON":
+- Check if the response is 304 with empty body
+- Verify cache headers are being stripped in the proxy
+- Check the response Content-Type header
+
+If the proxy route isn't being hit:
+- Clear the `.next` cache and restart
+- Check for syntax errors in `route.ts`
+- Verify the file is at `packages/aria-ui/src/app/api/proxy/[[...path]]/route.ts`
+
+---
+
 ## Mock LLM Testing Flow
 
 The system includes a deterministic mock LLM interceptor to facilitate end-to-end UI and state testing without spending real LLM tokens or relying on non-deterministic generation.
@@ -4761,3 +5064,265 @@ The environment configuration system now supports:
 - ✅ Clear documentation and troubleshooting guides
 
 This fixes the original issue where aria-agent couldn't run in Docker due to hardcoded localhost references.
+
+
+---
+
+## Control Center Pages
+
+**Added:** March 23, 2026  
+**Purpose:** Operator interface for manual task control and tool execution
+
+### Overview
+
+Control Center provides a specialized interface at `/control/tasks` for operators to manually control ARIA tasks with enhanced capabilities beyond the standard user interface.
+
+### Routes
+
+| Route | Purpose |
+|-------|---------|
+| `/control/tasks` | Control center task list with operator view |
+| `/control/tasks/[id]` | Individual task control page with Stream Deck tool panel |
+
+### Key Features
+
+**Stream Deck Tool Panel:**
+- Manual execution of Web Agent tools (30 PinchTab tools)
+- Manual execution of Desktop Agent tools (18 desktop tools)
+- Real-time tool execution with modal feedback
+- Stop/Resume agent controls
+
+**Operator Role:**
+- WebSocket connection joins as `OPERATOR` role (not `USER`)
+- Receives control-specific events
+- Can execute tools manually while agent is stopped
+
+**VNC Interaction Control:**
+- VNC is interactive ONLY when user has taken over control (`control === Role.USER`)
+- Same rules as regular task page - requires "takeover" status
+- Previously had bug where VNC was always interactive in control mode (fixed March 23, 2026)
+
+### Components
+
+**Control Task List:**
+- `packages/aria-ui/src/app/control/tasks/page.tsx` - Main control center page
+- `packages/aria-ui/src/components/tasks/ControlTaskItem.tsx` - Task list item component
+
+**Control Task Detail:**
+- `packages/aria-ui/src/app/control/tasks/[id]/page.tsx` - Individual task control page
+- `packages/aria-ui/src/components/control/StreamDeckToolPanel.tsx` - Tool execution panel
+- `packages/aria-ui/src/components/control/ToolExecutionModal.tsx` - Tool execution feedback modal
+- `packages/aria-ui/src/components/control/TaskStatusDropdown.tsx` - Task status dropdown (NEW - March 23, 2026)
+
+**Hooks:**
+- `packages/aria-ui/src/hooks/useControlCenter.ts` - Control center state management
+
+### VNC Interaction Rules
+
+Both regular task pages (`/tasks/[id]`) and control pages (`/control/tasks/[id]`) follow the same VNC interaction rules:
+
+```typescript
+// Determine if user has control or is in takeover mode
+function hasUserControl(): boolean {
+  return (
+    control === Role.USER &&
+    (taskStatus === TaskStatus.RUNNING ||
+      taskStatus === TaskStatus.NEEDS_HELP)
+  );
+}
+
+// VNC is interactive ONLY when user has control
+function vncViewOnly(): boolean {
+  return !hasUserControl();
+}
+```
+
+**VNC States:**
+- `viewOnly={true}` - Read-only, no mouse/keyboard interaction
+- `viewOnly={false}` - Interactive, full mouse/keyboard control
+
+**When VNC is Interactive:**
+- User has clicked "Take Over" button (sets `control = Role.USER`)
+- Task status is `RUNNING` or `NEEDS_HELP`
+
+**When VNC is Read-Only:**
+- Agent is in control (`control = Role.ASSISTANT`)
+- Task is inactive (`COMPLETED`, `FAILED`, `CANCELLED`)
+- Task is pending (`PENDING`)
+
+### Bug Fix: VNC Always Interactive in Control Mode (March 23, 2026)
+
+**Problem:** VNC was always interactive on `/control/tasks/[id]` page regardless of takeover status, violating the requirement that VNC should only be interactive when user has taken over control.
+
+**Root Cause:** The `vncViewOnly()` function in control task page was hardcoded to return `false`, bypassing the takeover status check.
+
+**Fix:** Changed `vncViewOnly()` to use the same logic as regular task page: `return !hasUserControl()`.
+
+**Files Modified:**
+- `packages/aria-ui/src/app/control/tasks/[id]/page.tsx` - Fixed VNC interaction control
+
+### Bug Fix: Stop Agent Doesn't Actually Stop Agents (March 23, 2026)
+
+**Problem:** Clicking "Stop Agent" button set Redis flags (`manual_control = true`) but agents continued executing. The orchestration service didn't check these flags during execution, so agents would keep running through all steps.
+
+**Root Cause:** The orchestration service had no polling mechanism to check the `manual_control` flag. It would execute the entire plan without pausing, even when operator clicked "Stop Agent".
+
+**Fix:** Added `waitForManualControlRelease()` method that:
+1. Checks `manual_control` flag before each step execution
+2. Pauses execution when flag is `true`
+3. Polls Redis every 2 seconds to check if flag changes
+4. Resumes execution when flag is set to `false`
+5. Throws error if task is cancelled during pause
+
+**Files Modified:**
+- `packages/aria-agent/src/orchestration/orchestration.service.ts` - Added manual control polling
+
+**Implementation:**
+```typescript
+private async waitForManualControlRelease(taskId: string): Promise<void> {
+  const manualControl = await this.sharedState.get<boolean>(taskId, 'manual_control');
+  
+  if (!manualControl) {
+    return; // Not in manual control, continue execution
+  }
+  
+  this.logger.log(`\n[PAUSED] Manual control active - agent execution paused`);
+  
+  // Poll every 2 seconds until manual control is released
+  while (true) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    const stillInManualControl = await this.sharedState.get<boolean>(taskId, 'manual_control');
+    
+    if (!stillInManualControl) {
+      this.logger.log(`[RESUMED] Manual control released - resuming agent execution\n`);
+      return;
+    }
+    
+    // Check if task was cancelled while paused
+    const task = await this.tasksService.findById(taskId);
+    if (task.status === TaskStatus.CANCELLED) {
+      throw new Error(`Task ${taskId} was cancelled during manual control`);
+    }
+  }
+}
+```
+
+### Feature: Task Status Dropdown (March 23, 2026)
+
+**Purpose:** Allow operators to manually change task status from control page to any valid TaskStatus value.
+
+**Implementation:**
+
+**Backend Endpoint:**
+- `POST /control/tasks/:taskId/update-status` - Update task status
+- Validates status against allowed values
+- Updates database and Redis shared state
+- Emits WebSocket event for status change
+- Triggers cleanup for CANCELLED/FAILED statuses
+
+**Frontend Component:**
+- `TaskStatusDropdown` component with Select UI
+- Color-coded status options
+- Real-time status updates via API
+- Integrated into control page header
+
+**Files Created:**
+- `packages/aria-ui/src/components/control/TaskStatusDropdown.tsx` - Status dropdown component
+
+**Files Modified:**
+- `packages/aria-agent/src/control-center/control-center.controller.ts` - Added update-status endpoint
+- `packages/aria-agent/src/control-center/control-center.service.ts` - Added updateTaskStatus method
+- `packages/aria-ui/src/app/control/tasks/[id]/page.tsx` - Added dropdown to header
+
+**Valid Status Values:**
+- `PENDING` - Task is queued
+- `RUNNING` - Task is executing
+- `NEEDS_HELP` - Task needs user input
+- `NEEDS_REVIEW` - Task needs review
+- `COMPLETED` - Task finished successfully
+- `CANCELLED` - Task was cancelled
+- `FAILED` - Task failed
+
+**Usage:**
+1. Open control page at `/control/tasks/[id]`
+2. Click status dropdown in header (next to "CONTROL MODE" badge)
+3. Select new status from dropdown
+4. Status updates immediately across all clients via WebSocket
+
+### Feature: Operator Tool Usage Display in Chat (March 23, 2026)
+
+**Purpose:** Make operator tool usage appear in the chat section just like agent tool usage, providing visual feedback and transparency.
+
+**Problem:** When operators manually execute tools from the Stream Deck panel, the tool calls were not visible in the chat. Only agents' tool usage was displayed, making it unclear what the operator had done.
+
+**Solution:** Integrated `BrowserLoggerService` into control center to emit `browser_log` events for operator tool execution.
+
+**Implementation:**
+
+**Backend Changes:**
+- Added `BrowserLoggerService` dependency to `ControlCenterService`
+- Emit `tool.call` event before tool execution
+- Emit `tool.result` event after tool execution (success or failure)
+- Track execution duration for display
+
+**Flow:**
+1. Operator clicks tool in Stream Deck panel
+2. Backend emits `browser_log` event with type `tool.call` and agentName `OPERATOR`
+3. Tool executes (Web, Desktop, or Workflow)
+4. Backend emits `browser_log` event with type `tool.result` including success/error/duration
+5. Frontend `useChatSession` receives events and updates `toolCalls` Map
+6. `ToolCallContent` component renders operator tool call in chat
+
+**Visual Display:**
+- Operator tool calls appear with agent name "OPERATOR"
+- Same UI as agent tool calls (wrench icon, expandable details)
+- Shows tool name, parameters, result, duration, and success/error status
+- Color-coded: green for success, red for error
+
+**Files Modified:**
+- `packages/aria-agent/src/control-center/control-center.service.ts` - Added BrowserLoggerService integration
+
+**Example:**
+```
+🔧 OPERATOR → pinchtab_screenshot ✓ 1234ms
+   Input: {}
+   Output: { base64: "...", width: 1920, height: 1080 }
+```
+
+**Benefits:**
+- Full transparency of operator actions
+- Same visual treatment as agent actions
+- Easy to track what was done manually vs automatically
+- Helps with debugging and audit trails
+
+### Usage
+
+**Accessing Control Center:**
+1. Navigate to `/control/tasks` to see all tasks in operator view
+2. Click on a task to open control page at `/control/tasks/[id]`
+3. Use Stream Deck panel to manually execute tools
+4. Click "Take Over" to gain VNC interaction control
+5. Click "Proceed" to return control to agent
+
+**Manual Tool Execution:**
+1. Ensure agent is stopped (click "Stop Agent" if needed)
+2. Select tool from Stream Deck panel
+3. Fill in tool parameters in modal
+4. Execute tool and view result in modal AND chat
+5. Tool call appears in chat with "OPERATOR" label
+6. Resume agent when ready
+
+### Differences from Regular Task Page
+
+| Feature | Regular Task Page | Control Task Page |
+|---------|------------------|-------------------|
+| Route | `/tasks/[id]` | `/control/tasks/[id]` |
+| WebSocket Role | `USER` | `OPERATOR` |
+| Stream Deck Panel | ❌ No | ✅ Yes |
+| Manual Tool Execution | ❌ No | ✅ Yes |
+| VNC Interaction | Only on takeover | Only on takeover (same) |
+| Stop/Resume Agent | ❌ No | ✅ Yes |
+| Task Status Dropdown | ❌ No | ✅ Yes (NEW - March 23, 2026) |
+| Badge | None | "🎮 CONTROL MODE" |
+

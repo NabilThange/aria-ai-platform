@@ -8,6 +8,6 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 @Module({
   imports: [EventEmitterModule],
   providers: [WorkflowService, PinchTabService, DesktopService, BrowserLoggerService],
-  exports: [WorkflowService, PinchTabService, DesktopService],
+  exports: [WorkflowService, PinchTabService, DesktopService, BrowserLoggerService],
 })
 export class ServicesModule {}

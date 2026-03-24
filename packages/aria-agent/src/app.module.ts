@@ -13,6 +13,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { pinoLoggerConfig } from './logger/logger.config';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { MockLlmModule } from './mock/mock-llm.module';
+import { ControlCenterModule } from './control-center/control-center.module';
 // import { FirebaseModule } from './firebase/firebase.module'; // Disabled for deployment
 
 @Module({
@@ -29,6 +30,7 @@ import { MockLlmModule } from './mock/mock-llm.module';
     MessagesModule,
     SummariesModule,
     WorkflowsModule,
+    ControlCenterModule,
     PrismaModule,
     MockLlmModule,
   ],

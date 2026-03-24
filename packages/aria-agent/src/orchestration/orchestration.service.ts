@@ -212,6 +212,9 @@ export class OrchestrationService {
       log.info({ event: 'phase.started', phase: 'execution' }, 'Phase 3: Execution');
       let stepIndex = 0;
       while (stepIndex < plan.steps.length) {
+        // CHECK MANUAL CONTROL: Pause if operator has stopped the agent
+        await this.waitForManualControlRelease(taskId);
+        
         const step = plan.steps[stepIndex];
         await this.sharedState.set(taskId, 'current_step', step.id);
 
@@ -513,6 +516,9 @@ this.logger.log(`   [OK] Replan successful - restarting with ${newPlan!.steps.le
       let stepIndex = 0;
       
       while (stepIndex < plan.steps.length) {
+        // CHECK MANUAL CONTROL: Pause if operator has stopped the agent
+        await this.waitForManualControlRelease(taskId);
+        
         const step = plan.steps[stepIndex];
         await this.sharedState.set(taskId, 'current_step', step.id);
 
@@ -693,7 +699,37 @@ this.logger.log(`   [OK] Replan successful - restarting with ${newPlan!.steps.le
       throw error;
     }
   }
+
+  /**
+   * Wait for manual control to be released before continuing execution
+   * Polls Redis every 2 seconds to check if operator has released control
+   */
+  private async waitForManualControlRelease(taskId: string): Promise<void> {
+    const manualControl = await this.sharedState.get<boolean>(taskId, 'manual_control');
+    
+    if (!manualControl) {
+      return; // Not in manual control, continue execution
+    }
+    
+    this.logger.log(`\n[PAUSED] Manual control active - agent execution paused`);
+    this.logger.log(`Waiting for operator to release control...`);
+    
+    // Poll every 2 seconds until manual control is released
+    while (true) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const stillInManualControl = await this.sharedState.get<boolean>(taskId, 'manual_control');
+      
+      if (!stillInManualControl) {
+        this.logger.log(`[RESUMED] Manual control released - resuming agent execution\n`);
+        return;
+      }
+      
+      // Check if task was cancelled while paused
+      const task = await this.tasksService.findById(taskId);
+      if (task.status === TaskStatus.CANCELLED) {
+        throw new Error(`Task ${taskId} was cancelled during manual control`);
+      }
+    }
+  }
 }
-
-
-

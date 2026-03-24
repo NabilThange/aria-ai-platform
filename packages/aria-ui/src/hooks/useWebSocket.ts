@@ -104,15 +104,23 @@ export function useWebSocket({
     };
   }, []); // ← empty: socket created once, never reconnected due to re-renders
 
-  const joinTask = useCallback((taskId: string) => {
+  const joinTask = useCallback((taskId: string, role?: 'JUDGE' | 'OPERATOR') => {
     const socket = socketRef.current;
     if (!socket) return;
     if (currentTaskIdRef.current) {
       socket.emit("leave_task", currentTaskIdRef.current);
     }
-    socket.emit("join_task", taskId);
+    
+    // Send role if provided (for control center)
+    if (role) {
+      socket.emit("join_task", { taskId, role });
+      logger.debug({ event: "ws.join_task", taskId, role }, `Joined task room with role`);
+    } else {
+      socket.emit("join_task", taskId);
+      logger.debug({ event: "ws.join_task", taskId }, `Joined task room`);
+    }
+    
     currentTaskIdRef.current = taskId;
-    logger.debug({ event: "ws.join_task", taskId }, `Joined task room`);
   }, []);
 
   const leaveTask = useCallback(() => {

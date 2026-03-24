@@ -51,8 +51,8 @@ app
       pathRewrite: { "^/api/proxy/tasks": "/socket.io" },
     });
 
-    // Apply HTTP proxies
-    expressApp.use("/api/proxy/tasks", tasksProxy);
+    // DON'T apply HTTP proxy here - let Next.js API routes handle it
+    // expressApp.use("/api/proxy/tasks", tasksProxy);
     
     // VNC WebSocket proxy - handle HTTP requests (though WebSocket is typically upgrade-only)
     expressApp.use("/api/proxy/websockify", (req, res) => {

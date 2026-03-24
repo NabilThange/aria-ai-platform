@@ -37,9 +37,20 @@ export class TasksGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('join_task')
-  handleJoinTask(client: Socket, taskId: string) {
+  handleJoinTask(client: Socket, payload: { taskId: string; role?: 'JUDGE' | 'OPERATOR' }) {
+    const taskId = typeof payload === 'string' ? payload : payload.taskId;
+    const role = typeof payload === 'object' ? payload.role : undefined;
+    
     client.join(`task_${taskId}`);
-    this.logger.debug({ event: 'ws.join_task', clientId: client.id, taskId }, `Client joined task room`);
+    
+    // Store role in socket metadata for filtering
+    if (role) {
+      client.data.role = role;
+      client.data.taskId = taskId;
+      this.logger.debug({ event: 'ws.join_task', clientId: client.id, taskId, role }, `Client joined task room with role`);
+    } else {
+      this.logger.debug({ event: 'ws.join_task', clientId: client.id, taskId }, `Client joined task room`);
+    }
   }
 
   @SubscribeMessage('leave_task')
@@ -105,6 +116,8 @@ export class TasksGateway implements OnGatewayConnection, OnGatewayDisconnect {
   /**
    * Listen for task.status events from OrchestrationService
    * EventEmitter2 is used ONLY for UI notifications, NOT for agent-to-agent communication
+   * 
+   * CONTROL CENTER: Filter sensitive events based on client role
    */
   @OnEvent('task.status')
   handleTaskStatusEvent(payload: {
@@ -113,18 +126,86 @@ export class TasksGateway implements OnGatewayConnection, OnGatewayDisconnect {
     activeAgent: string | null;
     timestamp: string;
   }) {
-    // Emit to clients subscribed to this task
-    this.server.to(`task_${payload.taskId}`).emit('agent_status', {
-      status: payload.status,
-      activeAgent: payload.activeAgent,
-      timestamp: payload.timestamp,
+    // Check if this is a sensitive status that should only go to operators
+    const sensitiveStatuses = ['manual_control', 'operator_active'];
+    const isSensitive = sensitiveStatuses.includes(payload.status);
+
+    if (isSensitive) {
+      // Only emit to OPERATOR clients
+      this.emitToRole(`task_${payload.taskId}`, 'OPERATOR', 'agent_status', {
+        status: payload.status,
+        activeAgent: payload.activeAgent,
+        timestamp: payload.timestamp,
+      });
+      
+      this.logger.debug({ event: 'ws.agent_status_filtered', taskId: payload.taskId, status: payload.status }, 'Emitted to OPERATOR only');
+    } else {
+      // Emit to all clients in the room
+      this.server.to(`task_${payload.taskId}`).emit('agent_status', {
+        status: payload.status,
+        activeAgent: payload.activeAgent,
+        timestamp: payload.timestamp,
+      });
+
+      // Also emit general task update
+      this.server.to(`task_${payload.taskId}`).emit('task_status_changed', {
+        status: payload.status,
+        activeAgent: payload.activeAgent,
+      });
+    }
+  }
+
+  /**
+   * Emit event to clients with specific role
+   */
+  private emitToRole(room: string, role: 'JUDGE' | 'OPERATOR', event: string, data: any) {
+    const roomSockets = this.server.sockets.adapter.rooms.get(room);
+    if (!roomSockets) return;
+
+    for (const socketId of roomSockets) {
+      const socket = this.server.sockets.sockets.get(socketId);
+      if (socket && socket.data.role === role) {
+        socket.emit(event, data);
+      }
+    }
+  }
+
+  /**
+   * Emit manual control active event (OPERATOR only)
+   */
+  emitManualControlActive(taskId: string, active: boolean) {
+    this.emitToRole(`task_${taskId}`, 'OPERATOR', 'manual_control_active', {
+      taskId,
+      active,
+      timestamp: new Date().toISOString(),
+    });
+    
+    this.logger.debug({ event: 'ws.manual_control_active', taskId, active }, 'Manual control status emitted to operators');
+  }
+
+  /**
+   * Emit operator action (visible to all, but marked as from operator on C2)
+   */
+  emitOperatorAction(taskId: string, action: {
+    toolName: string;
+    parameters: any;
+    result: any;
+    timestamp: string;
+  }) {
+    // Emit to OPERATOR with full details
+    this.emitToRole(`task_${taskId}`, 'OPERATOR', 'operator_action', {
+      ...action,
+      source: 'OPERATOR',
     });
 
-    // Also emit general task update
-    this.server.to(`task_${payload.taskId}`).emit('task_status_changed', {
-      status: payload.status,
-      activeAgent: payload.activeAgent,
+    // Emit to JUDGE as if agent did it (no source field)
+    this.emitToRole(`task_${taskId}`, 'JUDGE', 'tool_execution_result', {
+      toolName: action.toolName,
+      result: action.result,
+      timestamp: action.timestamp,
     });
+    
+    this.logger.debug({ event: 'ws.operator_action', taskId, toolName: action.toolName }, 'Operator action emitted');
   }
 
   /**

@@ -5,7 +5,7 @@ import { logger } from "@/lib/logger";
  * Base configuration for API requests
  */
 const API_CONFIG = {
-  baseUrl: "/api",
+  baseUrl: "/api/proxy",
   headers: {
     "Content-Type": "application/json",
   },
@@ -30,12 +30,48 @@ async function apiRequest<T>(
     });
 
     if (!response.ok) {
+      const errorBody = await response.text();
+      logger.error(
+        { event: 'api.request_failed', endpoint, status: response.status, body: errorBody },
+        `API request failed: ${response.status} ${response.statusText}`
+      );
       throw new Error(
         `API request failed: ${response.status} ${response.statusText}`,
       );
     }
 
-    return await response.json();
+    // Handle 304 Not Modified - browser will use cached response
+    // The response body is empty, so we can't parse it
+    if (response.status === 304) {
+      logger.debug({ event: 'api.cache_hit', endpoint }, `Using cached response for ${endpoint}`);
+      // Return null to signal that cached data should be used
+      // The browser's cache will handle this automatically
+      return null;
+    }
+
+    // Get response text first, then try to parse as JSON
+    const bodyText = await response.text();
+    
+    // Handle empty responses
+    if (!bodyText || bodyText.trim() === '') {
+      logger.warn({ event: 'api.empty_response', endpoint }, `Empty response from ${endpoint}`);
+      return null;
+    }
+    
+    try {
+      return JSON.parse(bodyText);
+    } catch (parseError) {
+      logger.error(
+        { 
+          event: 'api.json_parse_failed', 
+          endpoint, 
+          contentType: response.headers.get('content-type'), 
+          bodyPreview: bodyText.substring(0, 200) 
+        },
+        `Failed to parse JSON response from ${endpoint}`
+      );
+      throw new Error(`Invalid JSON response from ${endpoint}`);
+    }
   } catch (error) {
     logger.error({ event: 'api.request_failed', endpoint }, `Error in API request to ${endpoint}`, error instanceof Error ? error : undefined);
     return null;
@@ -222,23 +258,13 @@ export async function fetchTaskCounts(): Promise<Record<string, number>> {
 }
 
 export async function fetchModels(): Promise<ModelsResponse> {
-  try {
-    const response = await fetch("/api/tasks/models", {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-    });
-    if (!response.ok) {
-      throw new Error("Failed to fetch models");
-    }
-    return await response.json();
-  } catch (error) {
-    logger.error({ event: 'models.fetch_failed' }, 'Error fetching models', error instanceof Error ? error : undefined);
-    return {
-      grouped: { google: [], groq: [], openrouter: [], bytez: [] },
-      flat: [],
-    };
-  }
+  const result = await apiRequest<ModelsResponse>("/tasks/models", {
+    method: "GET",
+  });
+  return result || {
+    grouped: { google: [], groq: [], openrouter: [], bytez: [] },
+    flat: [],
+  };
 }
 
 /**

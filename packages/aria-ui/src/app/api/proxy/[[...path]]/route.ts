@@ -8,15 +8,22 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
   const subPath = path.length ? path.join("/") : "";
   const url = `${BASE_URL}/${subPath}${req.nextUrl.search}`;
 
-  // Extract cookies from the incoming request
-  const cookies = req.headers.get("cookie");
+  // Forward all headers except hop-by-hop headers
+  const forwardHeaders = new Headers();
+  const hopByHopHeaders = new Set([
+    'connection', 'keep-alive', 'transfer-encoding', 
+    'te', 'trailer', 'proxy-authorization', 'proxy-authenticate', 'upgrade'
+  ]);
+
+  req.headers.forEach((value, key) => {
+    if (!hopByHopHeaders.has(key.toLowerCase())) {
+      forwardHeaders.set(key, value);
+    }
+  });
 
   const init: RequestInit = {
     method: req.method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(cookies && { Cookie: cookies }),
-    },
+    headers: forwardHeaders,
     body:
       req.method === "GET" || req.method === "HEAD"
         ? undefined
@@ -24,32 +31,55 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
   };
 
   try {
+    console.log(`[Proxy] Forwarding ${req.method} ${url}`);
+    
+    // Don't forward cache-related headers to avoid 304 responses
+    // The proxy should always get fresh data from backend
+    forwardHeaders.delete('if-none-match');
+    forwardHeaders.delete('if-modified-since');
+    
     const res = await fetch(url, init);
     const body = await res.text();
+    
+    console.log(`[Proxy] Backend responded: ${res.status} ${res.statusText}, Content-Type: ${res.headers.get('content-type')}, Body length: ${body.length}`);
 
-    // Extract Set-Cookie headers from the backend response
-    const setCookieHeaders = res.headers.getSetCookie?.() || [];
-
-    // Create response headers
-    const responseHeaders = new Headers({
-      "Content-Type": "application/json",
+    // Forward all response headers except hop-by-hop headers
+    const responseHeaders = new Headers();
+    res.headers.forEach((value, key) => {
+      if (!hopByHopHeaders.has(key.toLowerCase())) {
+        responseHeaders.set(key, value);
+      }
     });
 
-    // Add Set-Cookie headers if they exist
+    // Ensure Set-Cookie headers are preserved (they may be multiple)
+    const setCookieHeaders = res.headers.getSetCookie?.() || [];
     setCookieHeaders.forEach((cookie) => {
       responseHeaders.append("Set-Cookie", cookie);
     });
 
     return new Response(body, {
       status: res.status,
+      statusText: res.statusText,
       headers: responseHeaders,
     });
   } catch (error) {
-    console.error(`Proxy error for ${url}:`, error);
+    console.error(`[Proxy] Error for ${url}:`, error);
+    
+    // Distinguish between network errors and other errors
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    const isNetworkError = errorMessage.includes("fetch failed") || 
+                          errorMessage.includes("ECONNREFUSED") ||
+                          errorMessage.includes("ETIMEDOUT");
+    
     return new Response(
-      JSON.stringify({ error: "Failed to proxy request" }),
+      JSON.stringify({ 
+        error: "Failed to proxy request",
+        details: errorMessage,
+        type: isNetworkError ? "network_error" : "proxy_error",
+        backendUrl: url
+      }),
       {
-        status: 500,
+        status: isNetworkError ? 503 : 500,
         headers: { "Content-Type": "application/json" },
       }
     );
