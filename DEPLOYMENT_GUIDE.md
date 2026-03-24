@@ -109,15 +109,45 @@ git push -u origin main
 
 ---
 
-### OPTION A: Railway.com (Easiest - All in One Place)
+### OPTION A: Railway.com (Already Configured!)
+
+**✅ Good news:** Railway database and Redis are already set up and configured!
+
+**Your Railway URLs (already in `.env.cloud`):**
+- **DATABASE_URL:** `postgresql://postgres:fbCDRSoTvJGZhjmzcTGEPrKcdwofnGTc@centerbeam.proxy.rlwy.net:24523/railway`
+- **REDIS_URL:** `redis://default:ZWvVPQlipBEWrXSbQwtLmPSFQMIfKznu@centerbeam.proxy.rlwy.net:28015`
+
+**What you need to do:**
+
+1. **Verify Railway Services are Running:**
+   - Go to https://railway.app/dashboard
+   - Find your project: `aria-infrastructure` (or similar name)
+   - Verify 2 services are running:
+     - ✅ PostgreSQL (should show "Active")
+     - ✅ Redis (should show "Active")
+
+2. **Check Database Connection:**
+   ```bash
+   # Test if database is accessible
+   curl -I https://centerbeam.proxy.rlwy.net:24523
+   ```
+
+**✅ Checkpoint:** Railway PostgreSQL and Redis are active and accessible
+
+**⚠️ Note:** If services are not running or you need to create new ones, follow the detailed steps below.
+
+---
+
+### OPTION A (Detailed Setup): Creating New Railway Services
+
+**Only follow this section if you need to create Railway services from scratch:**
 
 #### Step 2A.1: Create Railway Project
 
 1. Go to https://railway.app
 2. Click "Start a New Project"
-3. Click "Deploy from GitHub repo" → Skip for now
-4. Click "Empty Project"
-5. Name it: `aria-infrastructure`
+3. Click "Empty Project"
+4. Name it: `aria-infrastructure`
 
 #### Step 2A.2: Add PostgreSQL Database
 
@@ -126,7 +156,7 @@ git push -u origin main
 3. Wait for deployment (30 seconds)
 4. Click on the PostgreSQL service
 5. Go to "Variables" tab
-6. Copy these values (you'll need them later):
+6. Copy these values:
    - `PGHOST`
    - `PGPORT`
    - `PGUSER`
@@ -138,12 +168,7 @@ git push -u origin main
 postgresql://PGUSER:PGPASSWORD@PGHOST:PGPORT/PGDATABASE
 ```
 
-Example:
-```
-postgresql://postgres:abc123xyz@roundhouse.proxy.rlwy.net:12345/railway
-```
-
-**Save this URL - you'll need it in Phase 3 & 4**
+**Update `packages/aria-agent/.env.cloud` with this URL**
 
 #### Step 2A.3: Add Redis
 
@@ -154,12 +179,13 @@ postgresql://postgres:abc123xyz@roundhouse.proxy.rlwy.net:12345/railway
 5. Go to "Variables" tab
 6. Copy the `REDIS_URL` value
 
-Example:
-```
-redis://default:abc123xyz@redis.railway.internal:6379
-```
+**Update `packages/aria-agent/.env.cloud` with this URL**
 
-**Save this URL - you'll need it in Phase 3 & 4**
+**Then copy to active config:**
+```bash
+cd packages/aria-agent
+cp .env.cloud .env
+```
 
 **✅ Checkpoint:** You should have 2 services running in Railway: PostgreSQL and Redis
 
@@ -315,46 +341,59 @@ cloudflared --version
 
 ### Step 4.2: Configure Backend Environment Variables
 
-**Location:** `C:\Users\thang\Projects\Aria\Aria\packages\aria-agent\.env`
+**Location:** `C:\Users\thang\Projects\Aria\Aria\packages\aria-agent\`
 
-**Action:** Update the `.env` file with cloud database URLs from Phase 2
+**Action:** The codebase now has separate environment files for local and cloud deployment.
 
-**File path:** `packages/aria-agent/.env`
+**Available files:**
+- `.env.local` - For local development (uses localhost for database/redis)
+- `.env.cloud` - For cloud deployment (uses Railway/Supabase URLs)
+- `.env` - Active configuration (copy from either .local or .cloud)
 
-**Update these lines:**
+**For this deployment, we'll use the cloud configuration:**
 
+```bash
+# Navigate to backend directory
+cd C:\Users\thang\Projects\Aria\Aria\packages\aria-agent
+
+# Copy cloud configuration to active .env
+cp .env.cloud .env
+```
+
+**On Windows (if cp doesn't work):**
+```bash
+copy .env.cloud .env
+```
+
+**What's in `.env.cloud`:**
 ```env
-# Replace with your DATABASE_URL from Phase 2
-DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@YOUR_HOST:5432/YOUR_DB
-
-# Replace with your REDIS_URL from Phase 2
-REDIS_URL=redis://default:YOUR_PASSWORD@YOUR_HOST:6379
+# Railway Cloud Database & Redis
+DATABASE_URL=postgresql://postgres:fbCDRSoTvJGZhjmzcTGEPrKcdwofnGTc@centerbeam.proxy.rlwy.net:24523/railway
+REDIS_URL=redis://default:ZWvVPQlipBEWrXSbQwtLmPSFQMIfKznu@centerbeam.proxy.rlwy.net:28015
 
 # Keep these as localhost (desktop runs locally)
 ARIA_DESKTOP_BASE_URL=http://localhost:9990
 PINCHTAB_BASE_URL=http://localhost:9867
 
-# Keep your existing API keys (DO NOT CHANGE)
+# All your existing API keys remain unchanged
 GROQ_API_KEY_1=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
-GROQ_API_KEY_2=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
-# ... (keep all existing keys)
+# ... (all other keys preserved)
 
-# Keep these settings
+# Settings
 ENABLE_MULTI_AGENT=true
 AUTO_APPROVE_PLAN=false
 PINCHTAB_HEADED_MODE=true
 ```
 
-**Example with Railway PostgreSQL:**
-```env
-DATABASE_URL=postgresql://postgres:abc123xyz@roundhouse.proxy.rlwy.net:12345/railway
-REDIS_URL=redis://default:xyz789abc@redis.railway.internal:6379
-```
+**⚠️ IMPORTANT:** 
+- `.env.cloud` already has the correct Railway URLs configured
+- All API keys are preserved from the original `.env`
+- Just copy `.env.cloud` to `.env` - no manual editing needed!
 
-**Example with Supabase + Upstash:**
-```env
-DATABASE_URL=postgresql://postgres:mypassword@db.abc123xyz.supabase.co:5432/postgres
-REDIS_URL=redis://default:mypassword@us1-merry-firefly-12345.upstash.io:6379
+**To switch back to local development later:**
+```bash
+# Use local database/redis
+cp .env.local .env
 ```
 
 ### Step 4.3: Run Database Migrations
@@ -1039,12 +1078,18 @@ docker logs aria-desktop --tail 50 -f
 
 ### Issue 3: "Database connection timeout"
 
-**Cause:** Database might be paused (Supabase) or connection string is wrong
+**Cause:** Database might be paused or connection string is wrong
 
 **Solution:**
-1. Check if database is active in dashboard
-2. Verify `DATABASE_URL` in `packages/aria-agent/.env`
-3. Test connection: `npx prisma db pull`
+1. Check if database is active in Railway dashboard: https://railway.app/dashboard
+2. Verify Railway services are running (PostgreSQL should show "Active")
+3. Confirm you're using `.env.cloud`:
+   ```bash
+   cd packages/aria-agent
+   cp .env.cloud .env
+   ```
+4. Test connection: `npx prisma db pull`
+5. Check Railway logs for database errors
 
 ---
 
@@ -1053,9 +1098,15 @@ docker logs aria-desktop --tail 50 -f
 **Cause:** Redis might be down or connection string is wrong
 
 **Solution:**
-1. Check if Redis is active in dashboard
-2. Verify `REDIS_URL` in `packages/aria-agent/.env`
-3. If Upstash: Make sure you're using the correct URL format
+1. Check if Redis is active in Railway dashboard: https://railway.app/dashboard
+2. Verify Redis service is running (should show "Active")
+3. Confirm you're using `.env.cloud`:
+   ```bash
+   cd packages/aria-agent
+   cp .env.cloud .env
+   ```
+4. Check Railway logs for Redis errors
+5. Verify `REDIS_URL` format in `.env.cloud`
 
 ---
 
