@@ -5,7 +5,7 @@ import { NextRequest } from "next/server";
  * Proxies WebSocket connections from the browser to the desktop daemon
  */
 export async function GET(req: NextRequest) {
-  const desktopVncUrl = process.env.ARIA_DESKTOP_VNC_URL || "ws://localhost:9990/websockify";
+  const desktopVncUrl = process.env.ARIA_DESKTOP_VNC_URL!;
   
   console.log("[WebSocket Proxy] Incoming WebSocket upgrade request");
   console.log("[WebSocket Proxy] Target URL:", desktopVncUrl);

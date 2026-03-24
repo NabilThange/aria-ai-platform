@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 /* Proxy for backend API requests                                       */
 /* -------------------------------------------------------------------- */
 async function proxy(req: NextRequest, path: string[]): Promise<Response> {
-  const BASE_URL = process.env.ARIA_AGENT_BASE_URL || "http://localhost:9991";
+  const BASE_URL = process.env.ARIA_AGENT_BASE_URL!;
   const subPath = path.length ? path.join("/") : "";
   const url = `${BASE_URL}/${subPath}${req.nextUrl.search}`;
 

@@ -5,7 +5,7 @@ let socketInstance: Socket | null = null;
 
 export const getSocket = (): Socket => {
   if (!socketInstance) {
-    socketInstance = io(process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001", {
+    socketInstance = io(process.env.NEXT_PUBLIC_API_URL!, {
       path: "/socket.io",
       transports: ["websocket"],
       autoConnect: true,

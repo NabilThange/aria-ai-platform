@@ -29,7 +29,7 @@ export function VncViewer({ viewOnly = true, mode = "online" }: VncViewerProps) 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const desktopVncUrl = process.env.NEXT_PUBLIC_DESKTOP_VNC_URL || "ws://localhost:9990/websockify";
+    const desktopVncUrl = process.env.NEXT_PUBLIC_DESKTOP_VNC_URL!;
     logger.debug({ event: 'vnc.setup', mode, url: desktopVncUrl }, 'Setting up VNC WebSocket connection');
     setConnectionStatus("Connecting...");
     setError(null);
