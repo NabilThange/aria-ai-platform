@@ -38,15 +38,22 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
     forwardHeaders.delete('if-none-match');
     forwardHeaders.delete('if-modified-since');
     
+    // IMPORTANT: Don't forward accept-encoding to prevent compression issues
+    // Let the backend send uncompressed data, Vercel will compress it
+    forwardHeaders.delete('accept-encoding');
+    
     const res = await fetch(url, init);
     const body = await res.text();
     
     console.log(`[Proxy] Backend responded: ${res.status} ${res.statusText}, Content-Type: ${res.headers.get('content-type')}, Body length: ${body.length}`);
 
-    // Forward all response headers except hop-by-hop headers
+    // Forward all response headers except hop-by-hop headers and compression headers
     const responseHeaders = new Headers();
     res.headers.forEach((value, key) => {
-      if (!hopByHopHeaders.has(key.toLowerCase())) {
+      const lowerKey = key.toLowerCase();
+      if (!hopByHopHeaders.has(lowerKey) && 
+          lowerKey !== 'content-encoding' && 
+          lowerKey !== 'content-length') {
         responseHeaders.set(key, value);
       }
     });
