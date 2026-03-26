@@ -8,7 +8,6 @@ import {
   isAgentThinkingContentBlock,
   isAgentPlanContentBlock,
   isAgentVerifyContentBlock,
-  isAgentQuestionContentBlock,
   isAgentRecoveryContentBlock,
   isAgentReportContentBlock,
 } from "@bytebot/shared";
@@ -20,7 +19,6 @@ import {
   AgentThinkingContent,
   AgentPlanContent,
   AgentVerifyContent,
-  AgentQuestionContent,
   AgentRecoveryContent,
   AgentReportContent,
 } from "./AgentActionContent";
@@ -170,12 +168,7 @@ export function MessageContent({
             />
           )}
 
-          {isAgentQuestionContentBlock(block) && (
-            <AgentQuestionContent
-              agent={block.agent}
-              question={block.question}
-            />
-          )}
+          {/* AgentQuestionContent removed - clarifier questions are handled internally */}
 
           {isAgentRecoveryContentBlock(block) && (
             <AgentRecoveryContent

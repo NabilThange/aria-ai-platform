@@ -1,7 +1,7 @@
 # ARIA Multi-Agent System - Complete Architecture
 
 **Generated:** March 18, 2026  
-**Last Updated:** March 23, 2026 - Added Textarea Component & Fixed Hugeicons Imports  
+**Last Updated:** March 26, 2026 - Updated Clarifier to never ask about email credentials; removed AgentQuestionContent UI component; enhanced Orchestrator planning with detailed examples; fixed agent config save 404 error; fixed desktop interaction on control page  
 **Purpose:** Complete frontend-backend flow with exact tools, inputs, outputs, and context sources
 
 ---

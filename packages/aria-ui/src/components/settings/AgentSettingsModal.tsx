@@ -116,7 +116,7 @@ export function AgentSettingsModal({ open, onOpenChange }: AgentSettingsModalPro
 
   const fetchAgentConfigs = async () => {
     try {
-      const response = await fetch("/api/agents/config");
+      const response = await fetch("/api/proxy/agents/config");
       if (response.ok) {
         const data = await response.json();
         console.log("📥 [FRONTEND] Fetched agent configurations:");
@@ -165,7 +165,7 @@ export function AgentSettingsModal({ open, onOpenChange }: AgentSettingsModalPro
     })));
     
     try {
-      const response = await fetch("/api/agents/config", {
+      const response = await fetch("/api/proxy/agents/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ agents: agentConfigs }),

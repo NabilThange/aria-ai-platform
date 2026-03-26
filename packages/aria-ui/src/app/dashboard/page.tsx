@@ -85,7 +85,7 @@ export default function Home() {
       // Fetch current ORCHESTRATOR model from agent config
       let orchestratorModel: Model | undefined;
       try {
-        const agentConfigResponse = await fetch("/api/agents/config");
+        const agentConfigResponse = await fetch("/api/proxy/agents/config");
         if (agentConfigResponse.ok) {
           const agentConfig = await agentConfigResponse.json();
           const orchestratorConfig = agentConfig.agents?.find((a: any) => a.name === 'ORCHESTRATOR');

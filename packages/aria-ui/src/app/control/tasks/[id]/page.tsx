@@ -202,9 +202,10 @@ export default function TaskPage() {
     );
   }
 
-  // CONTROL MODE: VNC is interactive ONLY when user has taken over control
+  // CONTROL MODE: VNC is always interactive on this page (user is operating as ARIA)
   function vncViewOnly(): boolean {
-    return !hasUserControl();
+    // In control mode, desktop is always interactive unless task is inactive
+    return isTaskInactive();
   }
 
   // Use scroll screenshot hook for inactive tasks
