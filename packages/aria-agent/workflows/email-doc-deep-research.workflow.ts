@@ -183,22 +183,42 @@ export async function execute(variables: any, services: WorkflowServices): Promi
         console.log(`🧹 Cleaning up temp file: ${tempFilePath}`);
         
         // Open a fresh terminal for cleanup
-        await desktop.launchApplication('terminal');
-        await desktop.wait(2000);
+        await logger.logToolCall('launchApplication', { application: 'terminal' }, () =>
+          desktop.launchApplication('terminal')
+        );
+        await logger.logToolCall('wait', { duration: 2000 }, () =>
+          desktop.wait(2000)
+        );
         
         // Click to focus
-        await desktop.clickMouse({ x: 640, y: 400 }, 'left');
-        await desktop.wait(500);
+        await logger.logToolCall('clickMouse', { x: 640, y: 400, button: 'left' }, () =>
+          desktop.clickMouse({ x: 640, y: 400 }, 'left')
+        );
+        await logger.logToolCall('wait', { duration: 500 }, () =>
+          desktop.wait(500)
+        );
         
         // Hit Enter for fresh prompt
-        await desktop.pressKeys(['Return']);
-        await desktop.wait(500);
+        await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
+          desktop.pressKeys(['Return'])
+        );
+        await logger.logToolCall('wait', { duration: 500 }, () =>
+          desktop.wait(500)
+        );
         
         // Delete temp file (use typeText instead of pasteText)
-        await desktop.typeText(`rm "${tempFilePath}"`, 0);
-        await desktop.wait(300);
-        await desktop.pressKeys(['Return']);
-        await desktop.wait(500);
+        await logger.logToolCall('typeText', { text: `rm "${tempFilePath}"` }, () =>
+          desktop.typeText(`rm "${tempFilePath}"`, 0)
+        );
+        await logger.logToolCall('wait', { duration: 300 }, () =>
+          desktop.wait(300)
+        );
+        await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
+          desktop.pressKeys(['Return'])
+        );
+        await logger.logToolCall('wait', { duration: 500 }, () =>
+          desktop.wait(500)
+        );
         console.log(`✅ Temp file deleted`);
       } catch (err: any) {
         console.warn(`⚠️ Cleanup failed: ${err.message}`);

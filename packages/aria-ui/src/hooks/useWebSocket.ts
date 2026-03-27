@@ -10,6 +10,18 @@ interface BrowserLogEvent {
   data: any;
 }
 
+interface AgentActivityEvent {
+  type: 'screenshot' | 'action' | 'reasoning' | 'perception';
+  data: any;
+  timestamp: string;
+}
+
+interface ToolExecutionEvent {
+  toolName: string;
+  result: any;
+  timestamp: string;
+}
+
 interface UseWebSocketProps {
   onTaskUpdate?: (task: Task) => void;
   onNewMessage?: (message: Message) => void;
@@ -17,6 +29,9 @@ interface UseWebSocketProps {
   onTaskDeleted?: (taskId: string) => void;
   onBrowserLog?: (log: BrowserLogEvent) => void;
   onAgentStatus?: (status: { status: string; activeAgent: string | null; timestamp: string }) => void;
+  onAgentActivity?: (activity: AgentActivityEvent) => void;
+  onToolExecution?: (tool: ToolExecutionEvent) => void;
+  onTaskStatusChanged?: (status: { status: string; activeAgent: string | null }) => void;
 }
 
 export function useWebSocket({
@@ -26,6 +41,9 @@ export function useWebSocket({
   onTaskDeleted,
   onBrowserLog,
   onAgentStatus,
+  onAgentActivity,
+  onToolExecution,
+  onTaskStatusChanged,
 }: UseWebSocketProps = {}) {
   const socketRef = useRef<Socket | null>(null);
   const currentTaskIdRef = useRef<string | null>(null);
@@ -39,12 +57,19 @@ export function useWebSocket({
   const onTaskDeletedRef = useRef(onTaskDeleted);
   const onBrowserLogRef = useRef(onBrowserLog);
   const onAgentStatusRef = useRef(onAgentStatus);
+  const onAgentActivityRef = useRef(onAgentActivity);
+  const onToolExecutionRef = useRef(onToolExecution);
+  const onTaskStatusChangedRef = useRef(onTaskStatusChanged);
+  
   onTaskUpdateRef.current = onTaskUpdate;
   onNewMessageRef.current = onNewMessage;
   onTaskCreatedRef.current = onTaskCreated;
   onTaskDeletedRef.current = onTaskDeleted;
   onBrowserLogRef.current = onBrowserLog;
   onAgentStatusRef.current = onAgentStatus;
+  onAgentActivityRef.current = onAgentActivity;
+  onToolExecutionRef.current = onToolExecution;
+  onTaskStatusChangedRef.current = onTaskStatusChanged;
 
   // Create the socket exactly ONCE on mount — empty dep array guarantees this.
   useEffect(() => {
@@ -95,6 +120,21 @@ export function useWebSocket({
     socket.on("agent_status", (status: { status: string; activeAgent: string | null; timestamp: string }) => {
       logger.debug({ event: "ws.agent_status", status: status.status, activeAgent: status.activeAgent }, "Agent status update");
       onAgentStatusRef.current?.(status);
+    });
+
+    socket.on("agent_activity", (activity: AgentActivityEvent) => {
+      logger.debug({ event: "ws.agent_activity", type: activity.type }, "Agent activity received");
+      onAgentActivityRef.current?.(activity);
+    });
+
+    socket.on("tool_execution_result", (tool: ToolExecutionEvent) => {
+      logger.debug({ event: "ws.tool_execution", toolName: tool.toolName }, "Tool execution result received");
+      onToolExecutionRef.current?.(tool);
+    });
+
+    socket.on("task_status_changed", (status: { status: string; activeAgent: string | null }) => {
+      logger.debug({ event: "ws.task_status_changed", status: status.status }, "Task status changed");
+      onTaskStatusChangedRef.current?.(status);
     });
 
     return () => {
