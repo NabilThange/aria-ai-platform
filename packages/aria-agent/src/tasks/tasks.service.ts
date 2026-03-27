@@ -25,10 +25,13 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SharedStateService } from '../shared-state/shared-state.service';
 import { AgentsService } from '../agents/agents.service';
 import { RedisService } from '../redis/redis.service';
+import { AgentLoggerService } from '../logger/agent-logger.service';
 
 @Injectable()
 export class TasksService {
   private readonly logger = new Logger(TasksService.name);
+  // Cache for tracking task status changes (to reduce polling log spam)
+  private readonly taskStatusCache = new Map<string, TaskStatus>();
 
   constructor(
     readonly prisma: PrismaService,
@@ -39,14 +42,18 @@ export class TasksService {
     private readonly sharedStateService: SharedStateService,
     private readonly agentsService: AgentsService,
     private readonly redisService: RedisService,
+    private readonly agentLogger: AgentLoggerService,
   ) {
     this.logger.log('TasksService initialized');
   }
 
   async create(createTaskDto: CreateTaskDto): Promise<Task> {
-    this.logger.log(
-      `Creating new task with description: ${createTaskDto.description}`,
-    );
+    // Log user request with new structured format
+    this.agentLogger.logUserRequest({
+      taskId: 'pending',
+      userInput: createTaskDto.description,
+      timestamp: new Date().toISOString(),
+    });
 
     const task = await this.prisma.$transaction(async (prisma) => {
       // Create the task first
@@ -221,8 +228,6 @@ export class TasksService {
   }
 
   async findById(id: string): Promise<Task> {
-    this.logger.log(`Retrieving task by ID: ${id}`);
-
     try {
       const task = await this.prisma.task.findUnique({
         where: { id },
@@ -236,7 +241,15 @@ export class TasksService {
         throw new NotFoundException(`Task with ID ${id} not found`);
       }
 
-      this.logger.debug(`Retrieved task with ID: ${id}`);
+      // Only log at INFO if status changed
+      const cachedStatus = this.taskStatusCache.get(id);
+      if (cachedStatus !== task.status) {
+        this.logger.log(`Task ${id} → ${task.status}`);
+        this.taskStatusCache.set(id, task.status);
+      } else {
+        this.logger.debug(`Retrieved task ${id} (status: ${task.status})`);
+      }
+
       return task;
     } catch (error: any) {
       this.logger.error(`Error retrieving task ID: ${id} - ${error.message}`);
@@ -246,7 +259,6 @@ export class TasksService {
   }
 
   async update(id: string, updateTaskDto: UpdateTaskDto): Promise<Task> {
-    this.logger.log(`Updating task with ID: ${id}`);
     this.logger.debug(`Update data: ${JSON.stringify(updateTaskDto)}`);
 
     const existingTask = await this.findById(id);
@@ -274,8 +286,11 @@ export class TasksService {
       this.eventEmitter.emit('task.failed', { taskId: id });
     }
 
-    this.logger.log(`Successfully updated task ID: ${id}`);
-    this.logger.debug(`Updated task: ${JSON.stringify(updatedTask)}`);
+    // Log status change (already logged by findById if status changed)
+    if (updateTaskDto.status && updateTaskDto.status !== existingTask.status) {
+      this.logger.log(`Task ${id} updated: ${existingTask.status} → ${updateTaskDto.status}`);
+      this.taskStatusCache.set(id, updateTaskDto.status);
+    }
 
     this.tasksGateway.emitTaskUpdate(id, updatedTask);
 
@@ -451,98 +466,6 @@ export class TasksService {
       return state;
     } catch (error) {
       this.logger.error(`Error retrieving shared state for task ${taskId}:`, error);
-      throw error;
-    }
-  }
-
-  async getClarificationSession(taskId: string): Promise<any> {
-    this.logger.log(`Retrieving clarification session for task ID: ${taskId}`);
-
-    // Verify task exists
-    const task = await this.findById(taskId);
-    if (!task) {
-      throw new NotFoundException(`Task with ID ${taskId} not found`);
-    }
-
-    try {
-      const session = await this.sharedStateService.get(taskId, 'clarification_session');
-      return session || { status: 'not_started' };
-    } catch (error) {
-      this.logger.error(`Error retrieving clarification session for task ${taskId}:`, error);
-      throw error;
-    }
-  }
-
-  async submitClarificationAnswer(
-    taskId: string,
-    questionId: string,
-    answer: string,
-  ): Promise<any> {
-    this.logger.log(`Submitting clarification answer for task ${taskId}, question ${questionId}`);
-
-    // Verify task exists
-    const task = await this.findById(taskId);
-    if (!task) {
-      throw new NotFoundException(`Task with ID ${taskId} not found`);
-    }
-
-    try {
-      // Get current session
-      const session = await this.sharedStateService.get<any>(taskId, 'clarification_session');
-      if (!session) {
-        throw new BadRequestException('No clarification session found');
-      }
-
-      // Add answer
-      const existingAnswerIndex = session.answers.findIndex(
-        (a: any) => a.questionId === questionId,
-      );
-      if (existingAnswerIndex >= 0) {
-        session.answers[existingAnswerIndex].answer = answer;
-      } else {
-        session.answers.push({ questionId, answer });
-      }
-
-      // Check if all questions are answered
-      if (session.answers.length === session.questions.length) {
-        session.status = 'completed';
-        // Emit event to resume task processing
-        this.eventEmitter.emit('clarification.completed', { taskId });
-      }
-
-      // Save updated session
-      await this.sharedStateService.set(taskId, 'clarification_session', session);
-
-      return session;
-    } catch (error) {
-      this.logger.error(`Error submitting clarification answer for task ${taskId}:`, error);
-      throw error;
-    }
-  }
-
-  async skipClarification(taskId: string): Promise<any> {
-    this.logger.log(`Skipping clarification for task ${taskId}`);
-
-    // Verify task exists
-    const task = await this.findById(taskId);
-    if (!task) {
-      throw new NotFoundException(`Task with ID ${taskId} not found`);
-    }
-
-    try {
-      // Get current session
-      const session = await this.sharedStateService.get<any>(taskId, 'clarification_session');
-      if (session) {
-        session.status = 'skipped';
-        await this.sharedStateService.set(taskId, 'clarification_session', session);
-      }
-
-      // Emit event to resume task processing
-      this.eventEmitter.emit('clarification.skipped', { taskId });
-
-      return { status: 'skipped' };
-    } catch (error) {
-      this.logger.error(`Error skipping clarification for task ${taskId}:`, error);
       throw error;
     }
   }

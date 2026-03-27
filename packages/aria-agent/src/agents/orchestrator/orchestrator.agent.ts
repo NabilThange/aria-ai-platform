@@ -84,31 +84,95 @@ export class OrchestratorAgent extends BaseAgent {
         },
       });
 
-      // Call model service (Bytez or Groq) based on user selection
+      // Initialize conversation history for ReAct loop
+      const conversationMessages: any[] = [
+        {
+          role: 'USER',
+          content: [{ type: 'text', text: prompt }],
+        },
+      ];
+
+      // ReAct loop: THOUGHT → ACTION → OBSERVATION → THOUGHT...
+      const MAX_ITERATIONS = 10;
+      let iteration = 0;
+      let planGenerated = false;
+      let finalResponse: any = null;
+      
+      // Get model config to determine tool format
       const modelConfig = this.getModel();
-      const response = await this.callModelService(
-        this.getSystemPrompt(useExtendedThinking),
-        [
-          {
-            role: 'USER',
-            content: [{ type: 'text', text: prompt }],
-          },
-        ] as any,
-        modelConfig.model,
-        true, // Enable tools for workflow discovery
-        taskId, // Pass taskId for tool execution
-      );
+
+      this.logger.log(`\n${'='.repeat(80)}`);
+      this.logger.log(`[ORCHESTRATOR REACT LOOP STARTED]`);
+      this.logger.log(`${'='.repeat(80)}\n`);
+
+      while (!planGenerated && iteration < MAX_ITERATIONS) {
+        iteration++;
+        this.logger.log(`\n${'-'.repeat(80)}`);
+        this.logger.log(`[ITERATION ${iteration}/${MAX_ITERATIONS}]`);
+        this.logger.log(`${'-'.repeat(80)}`);
+
+        // Call model service with accumulated conversation history
+        const response = await this.callModelService(
+          this.getSystemPrompt(useExtendedThinking),
+          conversationMessages,
+          modelConfig.model,
+          true, // Enable tools for workflow discovery
+          taskId, // Pass taskId for tool execution
+          modelConfig, // Pass model config for tool format detection
+        );
+
+        // Check if response contains a plan (text content with JSON)
+        const textContent = response.contentBlocks
+          ?.filter((block: any) => block.type === 'text')
+          .map((block: any) => block.text)
+          .join('\n');
+
+        // Log thinking if present
+        if (textContent && textContent.trim()) {
+          this.logger.log(`\n💭 THOUGHT (Iteration ${iteration}):`);
+          this.logger.log(textContent.substring(0, 500) + (textContent.length > 500 ? '...' : ''));
+        }
+
+        // Check if plan is generated (response contains JSON with "steps" field)
+        if (textContent && (textContent.includes('"steps"') || textContent.includes("'steps'"))) {
+          this.logger.log(`\n✅ Plan generated in iteration ${iteration}`);
+          planGenerated = true;
+          finalResponse = response;
+          break;
+        }
+
+        // If no more tool calls and no plan, force plan generation
+        const hasToolCalls = response.contentBlocks?.some((block: any) => block.type === 'tool_use');
+        if (!hasToolCalls && !planGenerated) {
+          this.logger.log(`\n⚠️  No tool calls and no plan - forcing plan generation`);
+          planGenerated = true;
+          finalResponse = response;
+          break;
+        }
+
+        // Continue loop if there are tool calls (handled by callModelService recursively)
+        this.logger.log(`   Continuing ReAct loop...`);
+      }
+
+      if (!finalResponse) {
+        throw new Error(`Orchestrator exceeded ${MAX_ITERATIONS} iterations without generating a plan`);
+      }
+
+      this.logger.log(`\n${'='.repeat(80)}`);
+      this.logger.log(`[ORCHESTRATOR REACT LOOP COMPLETED]`);
+      this.logger.log(`   Total iterations: ${iteration}`);
+      this.logger.log(`${'='.repeat(80)}\n`);
 
       // LOG AGENT RESPONSE TO BROWSER
       this.browserLogger.logAgentResponse(taskId, 'ORCHESTRATOR_AGENT', {
         model: modelConfig.model,
         provider: modelConfig.provider,
-        contentBlocks: response.contentBlocks || [],
-        tokenUsage: response.tokenUsage || {},
+        contentBlocks: finalResponse.contentBlocks || [],
+        tokenUsage: finalResponse.tokenUsage || {},
       });
 
       // Parse execution plan
-      const plan = this.parseExecutionPlan(response);
+      const plan = this.parseExecutionPlan(finalResponse);
 
       // LOG ORCHESTRATOR OUTPUT
       this.logger.log(`🎯 [OrchestratorAgent] Generated plan:`);
@@ -150,9 +214,8 @@ export class OrchestratorAgent extends BaseAgent {
         },
       });
 
-      const tokensUsed = response.tokenUsage?.totalTokens || 0;
-      const modelConfig5 = this.getModel();
-      this.logCost(tokensUsed, modelConfig5.model);
+      const tokensUsed = finalResponse.tokenUsage?.totalTokens || 0;
+      this.logCost(tokensUsed, modelConfig.model);
 
       return {
         success: true,
@@ -279,6 +342,7 @@ export class OrchestratorAgent extends BaseAgent {
     model: string,
     useTools: boolean,
     taskId?: string,
+    modelConfig?: any, // Model config for tool format detection
   ): Promise<any> {
     // Determine provider from model string
     // Groq models: openai/gpt-oss-*, meta-llama/llama-*
@@ -291,8 +355,15 @@ export class OrchestratorAgent extends BaseAgent {
     
     let response: any;
     
-    // Import workflow tools for orchestrator
+    // Import workflow tools - get both OpenAI and Anthropic formats
     const { workflowTools } = await import('../../groq/workflow.tools');
+    const { anthropicWorkflowTools } = await import('../../bytez/anthropic-workflow.tools');
+    
+    // Determine which tool format to use
+    // For Anthropic models via Bytez, use Anthropic format (input_schema)
+    // For all other models (Groq, Google, etc.), use OpenAI format (parameters)
+    const isAnthropicModel = model.startsWith('anthropic/');
+    const toolsToUse = isAnthropicModel ? anthropicWorkflowTools : workflowTools;
     
     if (isGroqModel) {
       this.logger.log(`🔧 Using Groq service for model: ${model}`);
@@ -302,17 +373,17 @@ export class OrchestratorAgent extends BaseAgent {
         model,
         useTools,
         undefined, // No abort signal
-        workflowTools, // Pass workflow tools
+        workflowTools, // Groq always uses OpenAI format
       );
     } else {
-      this.logger.log(`🔧 Using Bytez service for model: ${model}`);
+      this.logger.log(`🔧 Using Bytez service for model: ${model} (tool format: ${isAnthropicModel ? 'Anthropic' : 'OpenAI'})`);
       response = await this.bytezService.generateMessage(
         systemPrompt,
         messages,
         model,
         useTools,
         undefined, // No abort signal
-        workflowTools, // Pass workflow tools
+        toolsToUse, // Use appropriate tool format
       );
     }
     
@@ -370,34 +441,35 @@ export class OrchestratorAgent extends BaseAgent {
         })
       );
       
-      // Add tool results to conversation and call model again
-      // Format messages according to Anthropic/Bytez format (will be converted by service)
-      const toolMessages = toolCalls.map((toolCall: any) => ({
+      // Add assistant message with tool calls to conversation
+      const assistantMessage = {
         role: 'ASSISTANT',
-        content: [
-          {
-            type: 'tool_use',
-            id: toolCall.id,
-            name: toolCall.name,
-            input: toolCall.input,
-          },
-        ],
+        content: response.contentBlocks || [],
+      };
+      messages.push(assistantMessage);
+      
+      // Add user message with tool results to conversation
+      const toolResultContent = toolCalls.map((toolCall: any, index: number) => ({
+        type: 'tool_result',
+        tool_use_id: toolCall.id,
+        content: [{ type: 'text', text: JSON.stringify(toolResults[index]) }],
       }));
       
-      const resultMessages = toolResults.map((result: any, index: number) => ({
+      const userMessage = {
         role: 'USER',
-        content: [
-          {
-            type: 'tool_result',
-            tool_use_id: toolCalls[index].id,
-            content: [{ type: 'text', text: JSON.stringify(result) }],
-          },
-        ],
-      }));
+        content: toolResultContent,
+      };
+      messages.push(userMessage);
       
-      // Recursive call with tool results
-      const updatedMessages = [...messages, ...toolMessages, ...resultMessages];
-      return await this.callModelService(systemPrompt, updatedMessages, model, useTools, taskId);
+      // Log tool results for debugging
+      this.logger.log(`\n📊 OBSERVATION (Tool Results):`);
+      toolResults.forEach((result, index) => {
+        const resultStr = JSON.stringify(result);
+        this.logger.log(`   ${toolCalls[index].name}: ${resultStr.substring(0, 200)}${resultStr.length > 200 ? '...' : ''}`);
+      });
+      
+      // Recursive call with accumulated conversation history
+      return await this.callModelService(systemPrompt, messages, model, useTools, taskId);
     }
     
     return response;

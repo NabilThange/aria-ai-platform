@@ -26,7 +26,6 @@ import { AgentHandoffNotification } from "@/components/tasks/AgentHandoffNotific
 import { useAgentHandoff } from "@/hooks/useAgentHandoff";
 import { SharedStateViewer } from "@/components/tasks/SharedStateViewer";
 import { AgentExecutionHistory } from "@/components/tasks/AgentExecutionHistory";
-import { ClarificationQA } from "@/components/tasks/ClarificationQA";
 import { TaskSummary } from "@/components/tasks/TaskSummary";
 
 export default function TaskPage() {
@@ -102,7 +101,6 @@ export default function TaskPage() {
 
   // Check if user is admin (for shared state viewer)
   const [isAdmin, setIsAdmin] = useState(false);
-  const [showClarification, setShowClarification] = useState(false);
 
   useEffect(() => {
     // Check for admin flag in localStorage or environment
@@ -110,24 +108,6 @@ export default function TaskPage() {
                       process.env.NEXT_PUBLIC_ENABLE_DEBUG === 'true';
     setIsAdmin(adminFlag);
   }, []);
-
-  // Check if we need to show clarification Q&A
-  useEffect(() => {
-    const checkClarification = async () => {
-      if (taskStatus === TaskStatus.PENDING || taskStatus === TaskStatus.RUNNING) {
-        try {
-          const response = await fetch(`/api/proxy/tasks/${taskId}/clarification`);
-          if (response.ok) {
-            const data = await response.json();
-            setShowClarification(data.status === 'pending' && data.questions?.length > 0);
-          }
-        } catch (error) {
-          console.error('Failed to check clarification status:', error);
-        }
-      }
-    };
-    checkClarification();
-  }, [taskId, taskStatus]);
 
   // Fetch task details to check if planning is enabled
   useEffect(() => {
@@ -337,25 +317,6 @@ export default function TaskPage() {
             {(taskStatus === TaskStatus.COMPLETED || taskStatus === TaskStatus.FAILED) && (
               <div className="hide-scrollbar mb-4 max-h-[50vh] overflow-y-auto px-4">
                 <TaskSummary taskId={taskId} status={taskStatus} />
-              </div>
-            )}
-
-            {/* Show clarification Q&A if needed */}
-            {showClarification && (
-              <div className="hide-scrollbar mb-4 max-h-[60vh] overflow-y-auto px-4">
-                <ClarificationQA
-                  taskId={taskId}
-                  onComplete={() => {
-                    setShowClarification(false);
-                    // Refresh task details
-                    fetchTaskById(taskId).then(setTaskDetails);
-                  }}
-                  onSkip={() => {
-                    setShowClarification(false);
-                    // Refresh task details
-                    fetchTaskById(taskId).then(setTaskDetails);
-                  }}
-                />
               </div>
             )}
 

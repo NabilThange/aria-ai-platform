@@ -11,6 +11,7 @@ import { VerifierAgent } from '../agents/verifier/verifier.agent';
 import { RecoveryAgent } from '../agents/recovery/recovery.agent';
 import { ReporterAgent } from '../agents/reporter/reporter.agent';
 import { TaskLogger } from '../logger/task-logger';
+import { AgentLoggerService } from '../logger/agent-logger.service';
 import { TasksService } from '../tasks/tasks.service';
 import { TaskStatus } from '@prisma/client';
 import { PinchTabService } from '../services/pinchtab.service';
@@ -41,6 +42,7 @@ export class OrchestrationService {
     private readonly eventEmitter: EventEmitter2,
     private readonly pinchTabService: PinchTabService,
     private readonly workflowService: WorkflowService,
+    private readonly agentLogger: AgentLoggerService,
     @Inject(forwardRef(() => TasksService))
     private readonly tasksService: TasksService,
     @Inject(forwardRef(() => MessagesService))
@@ -62,11 +64,14 @@ export class OrchestrationService {
     const log = new TaskLogger(OrchestrationService.name, taskId, 'ORCHESTRATOR');
     const startTime = Date.now();
 
+    // Use AgentLoggerService for structured user request logging
+    this.agentLogger.logUserRequest({
+      taskId,
+      userInput,
+      timestamp: new Date().toISOString(),
+    });
+
     log.info({ event: 'orchestration.started', inputLength: userInput.length, model: taskModel?.name }, 'Multi-agent orchestration started');
-    this.logger.log(`\n${'='.repeat(80)}`);
-    this.logger.log(`[ORCHESTRATION STARTED] Task ID: ${taskId}`);
-    this.logger.log(`User Input: "${userInput.substring(0, 100)}${userInput.length > 100 ? '...' : ''}"`);
-    this.logger.log(`${'='.repeat(80)}\n`);
 
     try {
       if (taskModel) {
@@ -97,16 +102,7 @@ export class OrchestrationService {
 
       const clarifiedTask = clarified.data as any;
       if (clarifiedTask.questions_asked === 1 && clarifiedTask.clarified_goal?.startsWith('REQUIRES_USER_CLARIFICATION')) {
-        // Store clarification session (kept for backwards compat with frontend ClarificationQA)
-        const question = clarifiedTask.question;
-        const clarificationSession = {
-          status: 'pending',
-          questions: question ? [question] : [],
-          answers: [],
-          taskId,
-        };
-        
-        await this.sharedState.set(taskId, 'clarification_session', clarificationSession);
+        // Task needs clarification - question is already saved as a message by ClarifierAgent
         await this.sharedState.set(taskId, 'status', 'needs_clarification');
         this.emitStatus(taskId, 'needs_clarification', null);
         
@@ -114,11 +110,11 @@ export class OrchestrationService {
           event: 'task.paused', 
           reason: 'clarification_needed', 
           round: clarificationHistory.length + 1,
-          question: question?.question,
+          question: clarifiedTask.question?.question,
         }, `Task paused — waiting for user answer (round ${clarificationHistory.length + 1})`);
         
-        this.logger.warn(`[!] CLARIFICATION NEEDED (round ${clarificationHistory.length + 1}): ${question?.question}`);
-        this.logger.log(`[PAUSED] Task paused - waiting for user response\n`);
+        this.logger.warn(`[!] CLARIFICATION NEEDED (round ${clarificationHistory.length + 1}): ${clarifiedTask.question?.question}`);
+        this.logger.log(`[PAUSED] Task paused - waiting for user response in chat\n`);
         
         // Update task status to NEEDS_HELP and take over control
         await this.tasksService.update(taskId, {
@@ -552,6 +548,23 @@ this.logger.log(`   [OK] Replan successful - restarting with ${newPlan!.steps.le
 
           let result: any;
           
+          // Read recovery strategy if this is a retry (attempt 2+)
+          let recoveryStrategy: any = null;
+          if (attempts >= 2) {
+            recoveryStrategy = await this.sharedState.get(taskId, 'recovery_strategy');
+            if (recoveryStrategy && recoveryStrategy.strategy) {
+              this.logger.log(`   📋 Using recovery strategy: ${recoveryStrategy.strategy.substring(0, 100)}...`);
+            }
+          }
+          
+          // Read previous step results for context passing
+          const previousResults: any[] = await this.sharedState.get(taskId, 'step_results') || [];
+          const recentResults = previousResults.slice(-3); // Keep only last 3 step results
+          
+          if (recentResults.length > 0) {
+            this.logger.log(`   📊 Passing ${recentResults.length} previous step results to agent`);
+          }
+          
           // Handle workflow steps - delegate to Workflow Agent
           if (step.type === 'workflow') {
             this.logger.log(`   Executing WORKFLOW: ${step.workflow_name}`);
@@ -578,6 +591,7 @@ this.logger.log(`   [OK] Replan successful - restarting with ${newPlan!.steps.le
             }
           } else {
             // Handle regular web/desktop steps
+            // Note: Recovery strategy is already available in shared state and will be read by agents if needed
             result = step.type === 'web'
               ? await this.webAgent.execute(step, taskId)
               : await this.desktopAgent.execute(step, taskId);
@@ -605,6 +619,17 @@ this.logger.log(`   [OK] Replan successful - restarting with ${newPlan!.steps.le
           if (verification.action_succeeded) {
             success = true;
             this.logger.log(`\n   [OK] Step ${stepIndex + 1} COMPLETED successfully in ${Date.now() - attemptStart}ms`);
+            
+            // Save step result for passing to next agents
+            await this.sharedState.appendToArray(taskId, 'step_results', {
+              stepId: step.id,
+              stepIndex: stepIndex + 1,
+              agent: agentName,
+              action: result.action,
+              details: result.details,
+              timestamp: new Date().toISOString(),
+            });
+            
             await this.sharedState.appendToArray(taskId, 'action_history', {
               agent: agentName, action: result.action, result: 'success',
               timestamp: new Date().toISOString(), details: result.details,
@@ -631,6 +656,14 @@ this.logger.log(`   [OK] Replan successful - restarting with ${newPlan!.steps.le
               if (recoveryResult) {
                 this.logger.log(`   RECOVERY_AGENT Output:`);
                 this.logger.log(`      Strategy: ${recoveryResult?.strategy || 'N/A'}`);
+                
+                // Store recovery strategy for next attempt (limit to 200 chars to avoid context bloat)
+                const limitedStrategy = {
+                  strategy: recoveryResult.strategy?.substring(0, 200),
+                  avoid: recoveryResult.avoid,
+                  approach: recoveryResult.approach?.substring(0, 200),
+                };
+                await this.sharedState.set(taskId, 'recovery_strategy', limitedStrategy);
               }
             } else if (attempts === 3) {
               this.logger.warn(`   [L3] ESCALATION L3: Requesting ORCHESTRATOR replan...`);

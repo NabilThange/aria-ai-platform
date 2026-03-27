@@ -249,6 +249,10 @@ export class WebAgent extends BaseAgent {
     // Track downloads
     const downloadsBefore = await this.readState<string[]>(taskId, 'downloaded_files') || [];
 
+    // Initialize conversation history OUTSIDE the iteration loop
+    // This allows the agent to learn from previous actions
+    const conversationMessages: any[] = [];
+
     // Execute step with iteration loop
     let iteration = 0;
     let stepCompleted = false;
@@ -346,18 +350,26 @@ export class WebAgent extends BaseAgent {
         },
       });
 
-      // Call the appropriate service based on model provider
+      // Add user message to conversation history
+      conversationMessages.push({
+        role: 'user',
+        content: [{ type: 'text', text: prompt }],
+      });
+
+      // Trim conversation history if it gets too long (keep last 20 messages)
+      if (conversationMessages.length > 20) {
+        // Keep first 5 messages (initial context) and last 15 messages
+        conversationMessages.splice(5, conversationMessages.length - 20);
+        this.logger.log(`   Trimmed conversation history to 20 messages`);
+      }
+
+      // Call the appropriate service based on model provider with accumulated history
       let response;
       if (this.model.provider === 'google') {
         this.logger.log(`🔧 Using Google service for model: ${this.model.model}`);
         response = await this.googleService.generateMessage(
           systemPrompt,
-          [
-            {
-              role: 'user',
-              content: [{ type: 'text', text: prompt }],
-            },
-          ] as any,
+          conversationMessages, // Pass accumulated conversation history
           this.model.model,
           true, // Enable tool calling
           undefined, // No abort signal
@@ -367,12 +379,7 @@ export class WebAgent extends BaseAgent {
         this.logger.log(`🔧 Using Bytez service for model: ${this.model.model}`);
         response = await this.bytezService.generateMessage(
           systemPrompt,
-          [
-            {
-              role: 'user',
-              content: [{ type: 'text', text: prompt }],
-            },
-          ] as any,
+          conversationMessages, // Pass accumulated conversation history
           this.model.model,
           true, // Enable tool calling
           undefined, // No abort signal
@@ -382,12 +389,7 @@ export class WebAgent extends BaseAgent {
         this.logger.log(`🔧 Using Groq service for model: ${this.model.model}`);
         response = await this.groqService.generateMessage(
           systemPrompt,
-          [
-            {
-              role: 'user',
-              content: [{ type: 'text', text: prompt }],
-            },
-          ] as any,
+          conversationMessages, // Pass accumulated conversation history
           this.model.model,
           true, // Enable tool calling
           undefined, // No abort signal
@@ -398,6 +400,12 @@ export class WebAgent extends BaseAgent {
       const tokensUsed = response.tokenUsage?.totalTokens || 0;
       totalTokens += tokensUsed;
       totalCost += this.calculateCost(tokensUsed);
+
+      // Add assistant's response to conversation history
+      conversationMessages.push({
+        role: 'assistant',
+        content: response.contentBlocks || [],
+      });
 
       // Browser log: Agent response
       this.browserLogger.logAgentResponse(taskId, 'WEB_AGENT', {
@@ -451,6 +459,16 @@ export class WebAgent extends BaseAgent {
           this.logger.log(`   🚀 Executing tool: ${toolCall.name}`);
           const toolFeedback = await this.executeToolCall(toolCall, taskId);
           lastAction = toolFeedback; // Use rich feedback instead of raw tool call
+          
+          // Add tool result to conversation history
+          conversationMessages.push({
+            role: 'user',
+            content: [{
+              type: 'tool_result',
+              tool_use_id: toolCall.id,
+              content: [{ type: 'text', text: toolFeedback }],
+            }],
+          });
           
           // Save web action as message
           const toolUseBlock = {

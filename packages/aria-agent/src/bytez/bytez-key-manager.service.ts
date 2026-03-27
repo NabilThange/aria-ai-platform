@@ -95,7 +95,7 @@ export class BytezKeyManagerService {
     const currentKey = this.keys[this.currentKeyIndex];
     const keyLabel = `Key ${this.currentKeyIndex + 1}`;
     
-    // Detect API key-related errors (rate limit, quota, invalid key, etc.)
+    // Detect API key-related errors
     const errorMessage = error?.message?.toLowerCase() || '';
     const isApiKeyError = 
       errorMessage.includes('rate limit') ||
@@ -111,33 +111,23 @@ export class BytezKeyManagerService {
       errorMessage.includes('payment');
 
     if (isApiKeyError) {
-      // Immediately disable key on API key errors
       currentKey.isDisabled = true;
       currentKey.lastFailure = new Date();
       this.logger.error(
-        `${keyLabel} IMMEDIATELY DISABLED due to API key error: ${error?.message || 'Unknown'}. ` +
-        `Will be re-enabled after ${this.reEnableAfterMinutes} minutes.`,
+        `${keyLabel} DISABLED: ${error?.message || 'API key error'}. Re-enabled after ${this.reEnableAfterMinutes}min.`,
       );
     } else {
-      // For other errors, use failure count threshold
       currentKey.failureCount++;
       currentKey.lastFailure = new Date();
 
-      this.logger.warn(
-        `${keyLabel} failed (${currentKey.failureCount}/${this.maxFailuresBeforeDisable} failures). Error: ${error?.message || 'Unknown'}`,
-      );
-
-      // Disable key if it has failed too many times
       if (currentKey.failureCount >= this.maxFailuresBeforeDisable) {
         currentKey.isDisabled = true;
         this.logger.error(
-          `${keyLabel} has been disabled after ${this.maxFailuresBeforeDisable} failures. ` +
-          `It will be re-enabled after ${this.reEnableAfterMinutes} minutes.`,
+          `${keyLabel} disabled after ${this.maxFailuresBeforeDisable} failures. Re-enabled after ${this.reEnableAfterMinutes}min.`,
         );
       }
     }
 
-    // Always rotate to next key
     this.rotateToNextKey();
   }
 
@@ -149,7 +139,6 @@ export class BytezKeyManagerService {
 
     const currentKey = this.keys[this.currentKeyIndex];
     if (currentKey.failureCount > 0) {
-      this.logger.log(`Key ${this.currentKeyIndex + 1} succeeded, resetting failure count`);
       currentKey.failureCount = 0;
       currentKey.lastFailure = undefined;
     }
@@ -165,13 +154,12 @@ export class BytezKeyManagerService {
       this.currentKeyIndex = (this.currentKeyIndex + 1) % this.keys.length;
       
       if (!this.keys[this.currentKeyIndex].isDisabled) {
-        this.logger.log(`Rotated to Key ${this.currentKeyIndex + 1}`);
+        this.logger.log(`[STATE CHANGE] API Key Rotated: Key ${startIndex + 1} -> Key ${this.currentKeyIndex + 1}`);
         return;
       }
       
-      // If we've checked all keys and they're all disabled
       if (this.currentKeyIndex === startIndex) {
-        this.logger.error('All keys are disabled, staying on current key');
+        this.logger.error('All keys disabled');
         return;
       }
     } while (true);
@@ -194,9 +182,7 @@ export class BytezKeyManagerService {
           keyConfig.isDisabled = false;
           keyConfig.failureCount = 0;
           keyConfig.lastFailure = undefined;
-          this.logger.log(
-            `Key ${i + 1} has been re-enabled after ${this.reEnableAfterMinutes} minutes`,
-          );
+          this.logger.log(`[STATE CHANGE] Key ${i + 1} re-enabled after ${this.reEnableAfterMinutes}min`);
         }
       }
     }

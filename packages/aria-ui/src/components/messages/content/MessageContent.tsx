@@ -10,6 +10,7 @@ import {
   isAgentVerifyContentBlock,
   isAgentRecoveryContentBlock,
   isAgentReportContentBlock,
+  isAgentQuestionContentBlock,
 } from "@bytebot/shared";
 import { TextContent } from "./TextContent";
 import { ImageContent } from "./ImageContent";
@@ -21,6 +22,7 @@ import {
   AgentVerifyContent,
   AgentRecoveryContent,
   AgentReportContent,
+  AgentQuestionContent,
 } from "./AgentActionContent";
 import { EditablePlanContent } from "./EditablePlanContent";
 
@@ -168,7 +170,12 @@ export function MessageContent({
             />
           )}
 
-          {/* AgentQuestionContent removed - clarifier questions are handled internally */}
+          {isAgentQuestionContentBlock(block) && (
+            <AgentQuestionContent
+              agent={block.agent}
+              question={block.question}
+            />
+          )}
 
           {isAgentRecoveryContentBlock(block) && (
             <AgentRecoveryContent

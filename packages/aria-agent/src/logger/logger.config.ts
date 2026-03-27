@@ -32,10 +32,35 @@ try {
   hasPinoPretty = false;
 }
 
+/**
+ * Per-service log level configuration
+ * Reduces noise from verbose services while keeping critical logs
+ */
+const SERVICE_LOG_LEVELS: Record<string, string> = {
+  'BytezService': 'warn',              // Only warnings and errors
+  'BytezKeyManagerService': 'info',    // Key rotations and errors only
+  'GroqService': 'warn',               // Only warnings and errors
+  'GroqKeyManagerService': 'info',     // Key rotations and errors only
+  'GoogleService': 'warn',             // Only warnings and errors
+  'MessagesService': 'warn',           // Reduce message processing noise
+  'AgentExecution': 'info',            // Agent execution logs (via AgentLogger)
+  'UserInteraction': 'info',           // User request logs
+};
+
+/**
+ * Get effective log level for a given context/service
+ */
+function getLogLevel(context?: string): string {
+  if (context && SERVICE_LOG_LEVELS[context]) {
+    return SERVICE_LOG_LEVELS[context];
+  }
+  return process.env.LOG_LEVEL ?? (isDev ? 'info' : 'info');
+}
+
 export const pinoLoggerConfig: Params = {
   pinoHttp: {
-    // Use LOG_LEVEL env var, default to 'info' in prod, 'debug' in dev
-    level: process.env.LOG_LEVEL ?? (isDev ? 'debug' : 'info'),
+    // Use LOG_LEVEL env var, default to 'info' (changed from 'debug' in dev)
+    level: process.env.LOG_LEVEL ?? 'info',
 
     // Structured JSON in prod, pretty-printed in dev (only if pino-pretty is available)
     transport: isDev && hasPinoPretty
@@ -56,11 +81,9 @@ export const pinoLoggerConfig: Params = {
       censor: '[REDACTED]',
     },
 
-    // Canonical request log: enrich every HTTP request log with useful context
-    customProps: (req: any) => ({
-      requestId: req.id,
-      userId: req.headers['x-user-id'] ?? undefined,
-    }),
+    // Don't add request context to every log - only to HTTP request logs
+    // This prevents req: {...} from appearing on agent execution logs
+    customProps: () => ({}),
 
     // Assign request IDs for tracing across microservices
     genReqId: (req: any) => {
@@ -83,22 +106,23 @@ export const pinoLoggerConfig: Params = {
     customLogLevel: (req: any, res: any, err: Error | undefined) => {
       if (err || res.statusCode >= 500) return 'error';
       if (res.statusCode >= 400) return 'warn';
-      // Sample 20% of successful health-check / polling endpoints
+      // Sample 10% of successful health-check / polling endpoints (reduced from 20%)
       if (req.url?.includes('/health') || req.url?.includes('/status')) {
-        return Math.random() < 0.2 ? 'debug' : 'silent';
+        return Math.random() < 0.1 ? 'debug' : 'silent';
+      }
+      // Reduce noise from frequent polling endpoints
+      if (req.url?.includes('/tasks') && req.method === 'GET') {
+        return 'debug'; // Move task polling to debug level
       }
       return 'info';
     },
 
-    // Serialize request/response for structured output
+    // Simplified serializers - only include essential info
     serializers: {
       req(req: any) {
         return {
-          id: req.id,
           method: req.method,
           url: req.url,
-          userAgent: req.headers?.['user-agent'],
-          remoteAddress: req.remoteAddress,
         };
       },
       res(res: any) {
@@ -111,7 +135,6 @@ export const pinoLoggerConfig: Params = {
           type: err.constructor?.name,
           message: err.message,
           stack: err.stack,
-          code: err.code,
         };
       },
     },

@@ -196,26 +196,6 @@ export class TasksController {
     return this.tasksService.getSharedState(taskId);
   }
 
-  @Get(':id/clarification')
-  async getClarificationQuestions(@Param('id') taskId: string) {
-    return this.tasksService.getClarificationSession(taskId);
-  }
-
-  @Post(':id/clarification/answer')
-  @HttpCode(HttpStatus.OK)
-  async submitClarificationAnswer(
-    @Param('id') taskId: string,
-    @Body() body: { questionId: string; answer: string },
-  ) {
-    return this.tasksService.submitClarificationAnswer(taskId, body.questionId, body.answer);
-  }
-
-  @Post(':id/clarification/skip')
-  @HttpCode(HttpStatus.OK)
-  async skipClarification(@Param('id') taskId: string) {
-    return this.tasksService.skipClarification(taskId);
-  }
-
   @Post(':id/approve-plan')
   @HttpCode(HttpStatus.OK)
   async approvePlan(

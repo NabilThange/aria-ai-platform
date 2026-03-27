@@ -69,6 +69,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # GL/GPU stubs
     libgl1-mesa-dri libgl1-mesa-glx libcap2-bin \
     xclip curl jq \
+    # Document creation & viewing
+    libreoffice-writer libreoffice-calc libreoffice-impress \
+    poppler-utils pandoc \
     && apt-get remove -y --purge \
         light-locker xfce4-screensaver xfce4-power-manager \
         xfce4-notifyd xfce4-pulseaudio-plugin \
@@ -101,10 +104,11 @@ RUN apt-get update \
     && fc-cache -f -v \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/*
 
-# websockify + pinchtab + kilocode
-RUN pip3 install --no-cache-dir websockify \
-    && npm install -g pinchtab @kilocode/cli \
-    && npm cache clean --force
+# websockify + pinchtab + opencode + document generation libraries
+RUN pip3 install --no-cache-dir websockify reportlab openpyxl python-docx \
+    && npm install -g pinchtab opencode-ai pptxgenjs docx \
+    && npm cache clean --force \
+    && curl -fsSL https://opencode.ai/install | bash
 
 # Copy built ariad from builder stage
 COPY --from=builder /aria /aria
@@ -132,8 +136,8 @@ RUN useradd -m -s /bin/bash user \
         /home/user/.config/autostart /home/user/.local/share \
         /home/user/.cache /home/user/.pinchtab /data/pinchtab \
     && chown -R user:user /tmp/aria-screenshots /home/user /data/pinchtab \
-    # Desktop shortcuts — chromium, terminal, thunar, mousepad only (no vscode)
-    && for f in chromium-browser xfce4-terminal thunar mousepad; do \
+    # Desktop shortcuts — chromium, terminal, thunar, mousepad, libreoffice
+    && for f in chromium-browser xfce4-terminal thunar mousepad libreoffice-writer libreoffice-calc libreoffice-impress; do \
         cp -f /usr/share/applications/$f.desktop /home/user/Desktop/ 2>/dev/null || true; \
        done \
     && chmod +x /home/user/Desktop/*.desktop 2>/dev/null || true \

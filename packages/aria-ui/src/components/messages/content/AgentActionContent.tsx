@@ -185,15 +185,28 @@ export function AgentQuestionContent({ agent, question }: AgentQuestionProps) {
   const colorClass = AGENT_COLORS[agent] || "text-bytebot-bronze-light-11 bg-bytebot-red-light-1 border-bytebot-bronze-light-7";
   
   return (
-    <div className={`mb-2 rounded-md border ${colorClass} p-3`}>
-      <div className="flex items-start gap-2">
-        <HugeiconsIcon icon={HelpCircleIcon} className="mt-0.5 h-4 w-4 flex-shrink-0 text-bytebot-bronze-light-12" />
-        <div className="flex-1">
-          <div className="mb-1 text-xs font-semibold text-bytebot-bronze-light-12">{agent} - Question</div>
-          <div className="text-xs text-bytebot-bronze-light-12">{question}</div>
+    <Card className={`mb-4 w-full shadow-sm overflow-hidden ${colorClass}`}>
+      <CardHeader className="pb-3 pt-4 px-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-bytebot-bronze-light-3 border border-bytebot-bronze-light-6">
+            <HugeiconsIcon icon={HelpCircleIcon} className="h-4 w-4 text-bytebot-bronze-light-11" />
+          </div>
+          <div className="flex flex-col">
+            <CardTitle className="text-[13px] font-semibold tracking-tight text-bytebot-bronze-light-12">
+              {agent} needs clarification
+            </CardTitle>
+            <CardDescription className="text-[11px] font-medium text-bytebot-bronze-light-10">
+              Please answer to continue
+            </CardDescription>
+          </div>
         </div>
-      </div>
-    </div>
+      </CardHeader>
+      <CardContent className="px-4 pb-4 pt-0">
+        <div className="text-sm text-bytebot-bronze-light-12 leading-relaxed">
+          {question}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

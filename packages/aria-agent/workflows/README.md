@@ -1572,3 +1572,315 @@
   ---
 
   **Happy workflow building! 🚀**
+
+
+---
+
+## 📦 Available Workflows
+
+### opencode-request (Universal Code & Document Generator)
+
+**Version:** 2.0.0  
+**Timeout:** 180 seconds (3 minutes)  
+**Description:** Universal coding assistant that creates websites, documents, presentations, spreadsheets, and more using OpenCode AI.
+
+**Capabilities:**
+- 🌐 **Websites & Web Apps** - HTML/CSS/JS, React, Vue, Next.js, etc.
+- 📊 **PowerPoint Presentations** (.pptx) - via pptxgenjs
+- 📄 **PDF Documents** - via reportlab (Python)
+- 📝 **Word Documents** (.docx) - via python-docx or docx (Node.js)
+- 📈 **Excel Spreadsheets** (.xlsx) - via openpyxl (Python)
+- 🐍 **Python Scripts** - Any Python automation or data processing
+- 📦 **Node.js Apps** - Backend services, CLI tools, utilities
+- 🎨 **Any Coding Task** - OpenCode handles it with AI
+
+**Variables:**
+```typescript
+{
+  userRequest: string  // Natural language description of what to build
+}
+```
+
+**Example Requests:**
+```typescript
+// PowerPoint presentation
+"Create a sales presentation with 5 slides about Q4 results. Use blue and white colors."
+
+// PDF report
+"Generate a PDF report about AI trends. Include title page and 3 sections."
+
+// Excel spreadsheet
+"Make a budget tracker with categories and monthly columns. Add formulas for totals."
+
+// Website
+"Build a landing page with hero section, features grid, and contact form. Modern design."
+
+// Multiple outputs
+"Create a presentation AND a PDF summary about our product."
+```
+
+**How It Works:**
+1. AI analyzes request and detects output type (website vs document vs script)
+2. Enhances prompt with technical details (libraries, file paths, structure)
+3. Opens terminal and launches OpenCode CLI
+4. Uses AI vision to detect when OpenCode is ready
+5. Submits enhanced prompt to OpenCode
+6. Waits 30 seconds for generation
+7. Lists generated files in /home/user directory
+8. Returns screenshot of final state
+
+**Output:**
+```typescript
+{
+  success: boolean,
+  message: string,
+  data: {
+    userRequest: string,
+    improvedPrompt: string,      // AI-enhanced prompt
+    cleanPrompt: string,          // Sanitized version sent to OpenCode
+    promptLength: number,
+    generatedFiles: string,       // ls output showing created files
+    finalScreenshot: string       // Base64 screenshot
+  }
+}
+```
+
+**Files Generated:**
+All files saved to `/home/user/` by default:
+- `/home/user/presentation.pptx`
+- `/home/user/report.pdf`
+- `/home/user/budget.xlsx`
+- `/home/user/document.docx`
+- `/home/user/index.html`
+
+**Viewing Generated Files:**
+- **PowerPoint** - LibreOffice Impress (desktop shortcut available)
+- **Word** - LibreOffice Writer (desktop shortcut available)
+- **Excel** - LibreOffice Calc (desktop shortcut available)
+- **PDF** - Chrome browser (opens natively)
+- **HTML** - Chrome browser
+
+**See Also:**
+- `packages/aria-agent/workflows/OPENCODE_EXAMPLES.md` - Detailed examples and use cases
+- `CONTEXT/DOCUMENT_GENERATION_GUIDE.md` - Library documentation and code examples
+
+---
+
+### google-search
+
+**Description:** Search Google and extract results  
+**Variables:** `query` (string)  
+**Note:** Uses DuckDuckGo to avoid CAPTCHAs
+
+---
+
+### send-email-n8n
+
+**Description:** Send email via n8n webhook  
+**Variables:** `recipient`, `subject`, `body`  
+**Requires:** n8n webhook URL configured
+
+---
+
+### take-screenshot
+
+**Description:** Capture desktop screenshot  
+**Variables:** None  
+**Returns:** Base64 encoded screenshot
+
+---
+
+### deep-research
+
+**Description:** Multi-step research workflow with web search and analysis  
+**Variables:** `topic` (string)  
+**Uses:** Combines google-search with AI summarization
+
+---
+
+## 🔧 Workflow Development Tips
+
+### When to Create a New Workflow
+
+**Create a workflow when:**
+- ✅ Task is reusable across multiple user requests
+- ✅ Task has clear inputs and outputs
+- ✅ Task follows a predictable sequence of steps
+- ✅ Task can be parameterized with variables
+
+**Don't create a workflow when:**
+- ❌ Task is one-off or highly specific
+- ❌ Task requires dynamic decision-making (let agents handle it)
+- ❌ Task is too simple (single API call)
+
+### Workflow vs Agent Decision
+
+| Use Workflow | Use Agent |
+|--------------|-----------|
+| Predictable steps | Dynamic decision-making |
+| Parameterized inputs | Complex reasoning required |
+| Reusable pattern | One-off task |
+| Fast execution | Needs error recovery |
+| No branching logic | Multiple possible paths |
+
+**Example:**
+- ✅ Workflow: "Send email to X with subject Y and body Z"
+- ❌ Workflow: "Research topic and decide whether to email or post to Slack"
+
+### Composing Workflows
+
+Workflows can call other workflows:
+
+```typescript
+export async function execute(variables, services) {
+  const { workflowService } = services;
+  
+  // Call another workflow
+  const searchResult = await workflowService.execute('google-search', {
+    query: 'AI trends 2026'
+  });
+  
+  // Use the result
+  const data = searchResult.data;
+  
+  // Call another workflow with the data
+  const emailResult = await workflowService.execute('send-email-n8n', {
+    recipient: 'team@company.com',
+    subject: 'Research Results',
+    body: JSON.stringify(data)
+  });
+  
+  return { success: true, message: 'Research sent via email' };
+}
+```
+
+### Testing Workflows
+
+**1. Via API:**
+```bash
+curl -X POST http://localhost:9991/api/workflows/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workflowName": "opencode-request",
+    "variables": {
+      "userRequest": "Create a simple HTML page with a button"
+    }
+  }'
+```
+
+**2. Via Task:**
+Create a task with workflow step:
+```json
+{
+  "title": "Test OpenCode",
+  "steps": [
+    {
+      "agent": "WORKFLOW",
+      "instruction": "Execute opencode-request workflow",
+      "workflowName": "opencode-request",
+      "workflowVariables": {
+        "userRequest": "Create a presentation about AI"
+      }
+    }
+  ]
+}
+```
+
+**3. Via Orchestrator:**
+Just ask naturally:
+> "Create a PowerPoint presentation about Q4 sales"
+
+The Orchestrator will discover and use the `opencode-request` workflow automatically.
+
+---
+
+## 📚 Additional Resources
+
+- **OpenCode Examples:** `packages/aria-agent/workflows/OPENCODE_EXAMPLES.md`
+- **Document Generation Guide:** `CONTEXT/DOCUMENT_GENERATION_GUIDE.md`
+- **Architecture Documentation:** `CONTEXT/ARIA_COMPLETE_ARCHITECTURE.md`
+- **Workflow Interface:** `packages/aria-agent/src/workflows/workflow.interface.ts`
+- **PinchTab API:** `packages/aria-agent/src/services/pinchtab.service.ts`
+- **Desktop API:** `packages/aria-agent/src/services/desktop.service.ts`
+
+---
+
+## 🎯 Quick Reference
+
+### Most Common Patterns
+
+**1. Web Scraping:**
+```typescript
+const instance = await pinchTab.launchInstance('scraper', 'headless');
+pinchTab.setCurrentInstance(instance.id);
+await pinchTab.navigate(url);
+await pinchTab.wait(3000);
+const text = await pinchTab.getPageText();
+await pinchTab.stopInstance(instance.id);
+```
+
+**2. Desktop Automation:**
+```typescript
+await desktop.launchApplication('chromium');
+await desktop.wait(2000);
+await desktop.pasteText(url);
+await desktop.pressKeys(['Return']);
+await desktop.wait(3000);
+const screenshot = await desktop.screenshot();
+```
+
+**3. AI Analysis:**
+```typescript
+const groqApiKey = process.env.GROQ_API_KEY_1;
+const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${groqApiKey}`,
+  },
+  body: JSON.stringify({
+    model: 'openai/gpt-oss-20b',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+  }),
+});
+const data = await response.json();
+const result = data.choices[0].message.content;
+```
+
+**4. File Operations:**
+```typescript
+// Write file
+const content = Buffer.from('Hello World', 'utf-8').toString('base64');
+await desktop.writeFile('/home/user/file.txt', content);
+
+// Read file
+const result = await desktop.readFile('/home/user/file.txt');
+const text = Buffer.from(result.content, 'base64').toString('utf-8');
+```
+
+**5. Profile-Based Browser:**
+```typescript
+// Get or create profile
+const profiles = await pinchTab.listProfiles();
+let profileId = profiles.find(p => p.name === 'my-profile')?.id;
+if (!profileId) {
+  const profile = await pinchTab.createProfile('my-profile', 'Description');
+  profileId = profile.id;
+}
+
+// Start with profile
+const instance = await pinchTab.startInstanceWithProfile(profileId, 'headed');
+pinchTab.setCurrentInstance(instance.id);
+
+// ... do work ...
+
+// Stop (preserves profile)
+await pinchTab.stopInstanceByProfile(profileId);
+```
+
+---
+
+**Happy workflow building! 🚀**

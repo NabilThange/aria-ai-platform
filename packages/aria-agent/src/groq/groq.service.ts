@@ -86,42 +86,23 @@ export class GroqService implements BytebotAgentService {
         const estimatedTokens = this.estimateTokenCount(systemPrompt, groqMessages, tools);
         const modelLimits = this.getModelLimits(model);
         
-        this.logger.log(`\n${'='.repeat(80)}`);
-        this.logger.log(`[GROQ API CALL] Model: ${model}`);
-        this.logger.log(`${'='.repeat(80)}`);
-        this.logger.log(`📊 CONTEXT SIZE BREAKDOWN:`);
-        this.logger.log(`   System Prompt: ~${this.estimateTextTokens(systemPrompt)} tokens`);
-        this.logger.log(`   Messages: ${groqMessages.length} messages, ~${this.estimateMessagesTokens(groqMessages)} tokens`);
-        this.logger.log(`   Tools: ${tools.length} tools, ~${this.estimateToolsTokens(tools)} tokens`);
-        this.logger.log(`   TOTAL ESTIMATED: ~${estimatedTokens} tokens`);
-        this.logger.log(`\n📈 MODEL LIMITS:`);
-        this.logger.log(`   Context Window: ${modelLimits.contextWindow.toLocaleString()} tokens`);
-        this.logger.log(`   TPM Limit: ${modelLimits.tpmLimit.toLocaleString()} tokens/minute`);
-        this.logger.log(`   RPM Limit: ${modelLimits.rpmLimit} requests/minute`);
-        
         const contextUsagePercent = (estimatedTokens / modelLimits.contextWindow) * 100;
         const tpmUsagePercent = (estimatedTokens / modelLimits.tpmLimit) * 100;
         
-        this.logger.log(`\n⚠️  USAGE WARNINGS:`);
+        // Only log at INFO if approaching limits or exceeding them
         if (estimatedTokens > modelLimits.contextWindow) {
-          this.logger.error(`   ❌ CONTEXT OVERFLOW: ${estimatedTokens} > ${modelLimits.contextWindow} (${contextUsagePercent.toFixed(1)}%)`);
-          this.logger.error(`   This request will FAIL with context length error!`);
-        } else if (contextUsagePercent > 90) {
-          this.logger.warn(`   ⚠️  Context usage: ${contextUsagePercent.toFixed(1)}% (near limit)`);
+          this.logger.error(`❌ CONTEXT OVERFLOW: ${estimatedTokens} > ${modelLimits.contextWindow} (${contextUsagePercent.toFixed(1)}%) - Request will FAIL`);
+        } else if (estimatedTokens > modelLimits.tpmLimit) {
+          this.logger.error(`❌ TPM OVERFLOW: ${estimatedTokens} > ${modelLimits.tpmLimit} (${tpmUsagePercent.toFixed(1)}%) - Request will FAIL with 413`);
+        } else if (contextUsagePercent > 80 || tpmUsagePercent > 80) {
+          this.logger.warn(`⚠️  ${model}: ${estimatedTokens} tokens (context: ${contextUsagePercent.toFixed(1)}%, TPM: ${tpmUsagePercent.toFixed(1)}%)`);
         } else {
-          this.logger.log(`   ✅ Context usage: ${contextUsagePercent.toFixed(1)}% (safe)`);
+          // Normal usage - log at DEBUG level only
+          this.logger.debug(`${model}: ${estimatedTokens} tokens (context: ${contextUsagePercent.toFixed(1)}%, TPM: ${tpmUsagePercent.toFixed(1)}%)`);
         }
         
-        if (estimatedTokens > modelLimits.tpmLimit) {
-          this.logger.error(`   ❌ TPM OVERFLOW: ${estimatedTokens} > ${modelLimits.tpmLimit} (${tpmUsagePercent.toFixed(1)}%)`);
-          this.logger.error(`   This request will FAIL with 413 rate limit error!`);
-          this.logger.error(`   SOLUTION: Truncate workflow descriptions or switch to higher TPM model`);
-        } else if (tpmUsagePercent > 90) {
-          this.logger.warn(`   ⚠️  TPM usage: ${tpmUsagePercent.toFixed(1)}% (near limit)`);
-        } else {
-          this.logger.log(`   ✅ TPM usage: ${tpmUsagePercent.toFixed(1)}% (safe)`);
-        }
-        this.logger.log(`${'='.repeat(80)}\n`);
+        // Detailed breakdown only at DEBUG level
+        this.logger.debug(`Token breakdown: system=${this.estimateTextTokens(systemPrompt)}, messages=${this.estimateMessagesTokens(groqMessages)}, tools=${this.estimateToolsTokens(tools)}`);
         // ===== END TOKEN COUNTING =====
 
         // DEBUG: Log final message structure

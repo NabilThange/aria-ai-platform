@@ -196,14 +196,18 @@ export class ClarifierAgent extends BaseAgent {
       }
 
       const questionsAsked = parsed.questions_asked ?? 0;
+      
+      // Enforce chatbot mode: only 0 or 1 question allowed
       if (questionsAsked !== 0 && questionsAsked !== 1) {
-        throw new Error(`questions_asked must be 0 or 1, got: ${questionsAsked}`);
+        this.logger.warn(`⚠️ Chatbot mode: questions_asked must be 0 or 1, got: ${questionsAsked}. Forcing to 1 and using first question only.`);
+        parsed.questions_asked = 1;
       }
 
-      // Validate singular question when questions_asked = 1
-      if (questionsAsked === 1) {
-        // Handle both `question` (new singular) and `questions` (old array — be tolerant)
-        const q = parsed.question ?? (Array.isArray(parsed.questions) ? parsed.questions[0] : null);
+      // Validate question when questions_asked = 1
+      if (questionsAsked === 1 || parsed.questions_asked === 1) {
+        // Support both singular question and questions array (take first only)
+        const q = parsed.question || (Array.isArray(parsed.questions) && parsed.questions.length > 0 ? parsed.questions[0] : null);
+        
         if (!q || !q.id || !q.question || !q.type || typeof q.required !== 'boolean') {
           throw new Error('questions_asked = 1 but question object is missing or invalid');
         }

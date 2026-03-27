@@ -107,6 +107,7 @@ export class PinchTabService {
     path: string,
     data?: any,
     retries: number = 3,
+    timeoutMs: number = 10000, // Allow custom timeout, default 10s
   ): Promise<any> {
     // Ensure we have auth token before making requests
     await this.ensureAuthToken();
@@ -124,7 +125,7 @@ export class PinchTabService {
     const options: RequestInit = {
       method,
       headers,
-      signal: AbortSignal.timeout(10000), // 10 second timeout
+      signal: AbortSignal.timeout(timeoutMs), // Use custom timeout
     };
 
     if (data) {
@@ -134,7 +135,7 @@ export class PinchTabService {
     let lastError: Error | null = null;
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        this.logger.debug(`Request attempt ${attempt}/${retries}: ${method} ${url}`);
+        this.logger.debug(`Request attempt ${attempt}/${retries}: ${method} ${url} (timeout: ${timeoutMs}ms)`);
         const response = await fetch(url, options);
         if (!response.ok) {
           const errorText = await response.text().catch(() => response.statusText);
@@ -247,17 +248,22 @@ export class PinchTabService {
       
       // Wait for instance to be fully ready (status: "starting" -> "ready")
       this.logger.log('Waiting for instance to be ready...');
-      const maxWait = 10; // 10 seconds max
+      const maxWait = 30; // 30 seconds max (increased from 10s to handle slow PinchTab startup)
+      const pollInterval = 2000; // Poll every 2 seconds (increased from 1s)
+      
       for (let i = 0; i < maxWait; i++) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
         // Instance is ready when we can successfully list tabs
         try {
           await this.request('GET', `/instances/${instance.id}/tabs`, undefined, 1);
-          this.logger.log('Instance is ready!');
+          this.logger.log(`Instance is ready after ${(i + 1) * pollInterval / 1000}s!`);
           break;
         } catch (error) {
+          const elapsed = (i + 1) * pollInterval / 1000;
+          this.logger.debug(`Instance not ready yet (${elapsed}s elapsed, status may be "starting")...`);
+          
           if (i === maxWait - 1) {
-            this.logger.warn(`Instance may not be fully ready after ${maxWait}s, proceeding anyway...`);
+            this.logger.warn(`Instance may not be fully ready after ${elapsed}s, proceeding anyway...`);
           }
         }
       }
@@ -294,10 +300,10 @@ export class PinchTabService {
     if (!id) throw new Error('No PinchTab instance available');
 
     try {
-      this.logger.debug(`Navigating to ${url}`);
+      this.logger.debug(`Navigating to ${url} (timeout: 20s for search engines)`);
       const data = await this.request('POST', `/instances/${id}/tabs/open`, {
         url,
-      });
+      }, 3, 20000); // 20 second timeout for slow search engines
 
       // Store the tab ID for subsequent operations
       const tabId = data.tabId || data.id;
@@ -348,7 +354,8 @@ export class PinchTabService {
 
     try {
       this.logger.debug(`Getting snapshot with filter: ${filter}`);
-      const response = await this.request('GET', `/tabs/${tid}/snapshot?filter=${filter}`);
+      // Use 30-second timeout for snapshots (search engines can be slow)
+      const response = await this.request('GET', `/tabs/${tid}/snapshot?filter=${filter}`, undefined, 3, 30000);
 
       return response;
     } catch (error) {
@@ -765,6 +772,29 @@ export class PinchTabService {
       };
 
       this.logger.log(`Instance started with profile: ${instance.id}`);
+      
+      // Wait for instance to be fully ready (status: "starting" -> "ready")
+      this.logger.log('Waiting for instance to be ready...');
+      const maxWait = 30; // 30 seconds max (increased to handle slow PinchTab startup)
+      const pollInterval = 2000; // Poll every 2 seconds
+      
+      for (let i = 0; i < maxWait; i++) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        // Instance is ready when we can successfully list tabs
+        try {
+          await this.request('GET', `/instances/${instance.id}/tabs`, undefined, 1);
+          this.logger.log(`Instance is ready after ${(i + 1) * pollInterval / 1000}s!`);
+          break;
+        } catch (error) {
+          const elapsed = (i + 1) * pollInterval / 1000;
+          this.logger.debug(`Instance not ready yet (${elapsed}s elapsed, status may be "starting")...`);
+          
+          if (i === maxWait - 1) {
+            this.logger.warn(`Instance may not be fully ready after ${elapsed}s, proceeding anyway...`);
+          }
+        }
+      }
+      
       return instance;
     } catch (error) {
       this.logger.error(`Failed to start instance with profile: ${error.message}`);

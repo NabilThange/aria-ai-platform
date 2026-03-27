@@ -181,63 +181,6 @@ export class AgentProcessor {
     await this.stopProcessing();
   }
 
-  @OnEvent('clarification.completed')
-  async handleClarificationCompleted({ taskId }: { taskId: string }) {
-    this.logger.log(`Clarification completed event received for task ID: ${taskId}`);
-    
-    // Get the clarification answer from shared state
-    const session = await this.sharedStateService.get<any>(taskId, 'clarification_session');
-    if (!session || !session.answers || session.answers.length === 0) {
-      this.logger.warn(`No clarification answers found for task ${taskId}`);
-      return;
-    }
-    
-    // Get the user's answer
-    const answer = session.answers[0].answer;
-    this.logger.log(`User clarification answer: ${answer}`);
-    
-    // Retrieve the pending question and accumulate history
-    const task = await this.tasksService.findById(taskId);
-    if (!task) {
-      this.logger.error(`Task ${taskId} not found`);
-      return;
-    }
-    
-    const pendingQuestion = await this.sharedStateService.get<string>(taskId, 'pending_clarification_question');
-    const existingHistory: Array<{ question: string; answer: string }> = 
-      await this.sharedStateService.get<any[]>(taskId, 'clarification_history') || [];
-    
-    if (pendingQuestion) {
-      existingHistory.push({ question: pendingQuestion, answer });
-      await this.sharedStateService.set(taskId, 'clarification_history', existingHistory);
-      this.logger.log(`History updated: ${existingHistory.length} turn(s)`);
-    }
-    
-    // Update task status to RUNNING
-    await this.tasksService.update(taskId, { status: TaskStatus.RUNNING });
-    
-    // Re-run orchestration — will pick up full history from clarification_history in shared state
-    try {
-      await this.orchestrationService.run(task.description, taskId, task.model);
-      
-      const taskStatus = await this.sharedStateService.get<string>(taskId, 'status');
-      
-      if (taskStatus === 'needs_clarification') {
-        this.logger.log(`Task ${taskId} needs more clarification`);
-        await this.tasksService.update(taskId, { status: TaskStatus.NEEDS_HELP });
-      } else if (taskStatus === 'awaiting_plan_approval') {
-        this.logger.log(`Task ${taskId} awaiting user plan approval`);
-        await this.tasksService.update(taskId, { status: TaskStatus.NEEDS_HELP });
-      } else {
-        await this.tasksService.update(taskId, { status: TaskStatus.COMPLETED });
-        this.logger.log(`Task ${taskId} completed after clarification`);
-      }
-    } catch (error) {
-      this.logger.error(`Task ${taskId} failed after clarification: ${error.message}`);
-      await this.tasksService.update(taskId, { status: TaskStatus.FAILED });
-    }
-  }
-
   async processTask(taskId: string) {
     this.logger.log(`Starting processing for task ID: ${taskId}`);
 

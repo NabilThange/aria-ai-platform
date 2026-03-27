@@ -11,6 +11,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { SummariesModule } from './summaries/summaries.modue';
 import { LoggerModule } from 'nestjs-pino';
 import { pinoLoggerConfig } from './logger/logger.config';
+import { CustomLoggerModule } from './logger/logger.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { MockLlmModule } from './mock/mock-llm.module';
 import { ControlCenterModule } from './control-center/control-center.module';
@@ -19,6 +20,7 @@ import { ControlCenterModule } from './control-center/control-center.module';
 @Module({
   imports: [
     LoggerModule.forRoot(pinoLoggerConfig),
+    CustomLoggerModule,
     ScheduleModule.forRoot(),
     EventEmitterModule.forRoot(),
     ConfigModule.forRoot({

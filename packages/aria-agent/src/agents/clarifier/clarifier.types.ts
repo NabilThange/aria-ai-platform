@@ -18,7 +18,7 @@ export interface ClarifiedTask {
   constraints: string[];      // e.g., "only invoices from March"
   assumptions: string[];      // e.g., "assuming Gmail is already logged in"
   task_type: 'web' | 'desktop' | 'mixed';
-  /** 0 = task is clear, proceed to orchestrator. 1 = need one more answer. */
+  /** 0 = task is clear, proceed to orchestrator. 1 = need one more answer (chatbot mode). */
   questions_asked: 0 | 1;
   /** Present only when questions_asked === 1 — exactly ONE question */
   question?: ClarificationQuestion;

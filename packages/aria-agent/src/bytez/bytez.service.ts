@@ -54,11 +54,8 @@ export class BytezService implements BytebotAgentService {
       return this.mockLlmService.handleMockTask(systemPrompt, messages, model);
     }
 
-    this.logger.log(`🔌 [BytezService] API call initiated`);
-    this.logger.log(`   Model: ${model}`);
-    this.logger.log(`   Use Tools: ${useTools}`);
-    this.logger.log(`   Messages: ${messages.length}`);
-    this.logger.log(`   System Prompt: ${systemPrompt?.substring(0, 100)}...`);
+    // Reduced logging - only log at debug level
+    this.logger.debug(`API call: ${model}, tools=${useTools}, messages=${messages.length}`);
     
     const maxRetries = this.keyManager.getTotalKeys();
     let lastError: Error | null = null;
@@ -119,21 +116,11 @@ export class BytezService implements BytebotAgentService {
         // Handle system prompt extraction for native Anthropic endpoint
         if (provider === 'anthropic') {
           // For native Anthropic endpoint, system prompt goes as separate parameter
-          // Remove system message from messages array if present
           const systemMessageIndex = bytezMessages.findIndex(m => m.role === 'system');
-          this.logger.debug(`System message index: ${systemMessageIndex}, Total messages before extraction: ${bytezMessages.length}`);
           if (systemMessageIndex !== -1) {
             const systemMessage = bytezMessages.splice(systemMessageIndex, 1)[0];
             requestBody.system = systemMessage.content;
-            this.logger.debug(`Extracted system message, remaining messages: ${bytezMessages.length}`);
           }
-        } else if (provider === 'google') {
-          // For Google Gemini, system prompt can stay in messages array
-          // Gemini accepts system messages in the standard format
-          this.logger.debug(`Using Google Gemini - keeping system message in messages array`);
-        } else {
-          // For open-source models (Qwen, Llama, etc.), keep system message in messages array
-          this.logger.debug(`Using open-source model (${provider}) - keeping system message in messages array`);
         }
 
         // Validate we have at least one message
@@ -141,32 +128,6 @@ export class BytezService implements BytebotAgentService {
           this.logger.error(`Empty messages array! bytezMessages length: ${bytezMessages.length}`);
           throw new Error('Cannot send request with empty messages array. This indicates a message formatting issue.');
         }
-
-        // DEBUG: Log the exact request being sent to Bytez (WITHOUT full image data to avoid huge logs)
-        this.logger.debug(`📤 Sending request to Bytez:`);
-        this.logger.debug(`   Endpoint: ${endpoint}`);
-        this.logger.debug(`   Messages count: ${requestBody.messages.length}`);
-        requestBody.messages.forEach((msg: any, idx: number) => {
-          this.logger.debug(`   Message ${idx}: role=${msg.role}, contentType=${typeof msg.content}, isArray=${Array.isArray(msg.content)}`);
-          if (Array.isArray(msg.content)) {
-            this.logger.debug(`      Content array length: ${msg.content.length}`);
-            msg.content.forEach((part: any, partIdx: number) => {
-              if (part.type === 'image') {
-                // Don't log full image data - just log that it exists
-                const dataSize = part.source?.data ? `${(part.source.data.length / 1024).toFixed(1)}KB` : 'unknown';
-                this.logger.debug(`      Part ${partIdx}: type=image, media_type=${part.source?.media_type}, size=${dataSize}`);
-              } else if (part.type === 'text') {
-                const textPreview = part.text?.substring(0, 100) || '';
-                this.logger.debug(`      Part ${partIdx}: type=text, length=${part.text?.length || 0}, preview="${textPreview}..."`);
-              } else {
-                this.logger.debug(`      Part ${partIdx}: type=${part.type}`);
-              }
-            });
-          } else if (typeof msg.content === 'string') {
-            const preview = msg.content.substring(0, 100);
-            this.logger.debug(`      Content: string, length=${msg.content.length}, preview="${preview}..."`);
-          }
-        });
 
         const response = await fetch(endpoint, {
           method: 'POST',
@@ -194,32 +155,13 @@ export class BytezService implements BytebotAgentService {
 
         // Handle native Anthropic endpoint response (when using native endpoint)
         if (useNativeAnthropicEndpoint && useTools) {
-          // Mark key as successful
           this.keyManager.markCurrentKeyAsSuccessful();
-          
-          // LOG ACTUAL RESPONSE CONTENT
-          this.logger.log(`📝 [BytezService] Native Anthropic response:`);
-          const providerContentPreview = JSON.stringify(data.provider?.content || []).substring(0, 500);
-          this.logger.log(`   Provider content: ${providerContentPreview}${providerContentPreview.length >= 500 ? '...[truncated]' : ''}`);
-          const outputPreview = JSON.stringify(data.output || {}).substring(0, 500);
-          this.logger.log(`   Output: ${outputPreview}${outputPreview.length >= 500 ? '...[truncated]' : ''}`);
-          
           return this.formatNativeAnthropicResponse(data);
         }
 
         // Handle OpenAI-compatible response format
         if (useTools && data.choices) {
-          // Mark key as successful
           this.keyManager.markCurrentKeyAsSuccessful();
-          
-          // LOG ACTUAL RESPONSE CONTENT
-          this.logger.log(`📝 [BytezService] OpenAI-format response:`);
-          this.logger.log(`   Message content: ${data.choices[0]?.message?.content || '(empty)'}`);
-          if (data.choices[0]?.message?.tool_calls) {
-            const toolCallsPreview = JSON.stringify(data.choices[0].message.tool_calls, null, 2).substring(0, 500);
-            this.logger.log(`   Tool calls: ${toolCallsPreview}${toolCallsPreview.length >= 500 ? '...[truncated]' : ''}`);
-          }
-          
           return this.formatOpenAIResponse(data);
         }
 
@@ -240,16 +182,6 @@ export class BytezService implements BytebotAgentService {
 
         // Mark key as successful
         this.keyManager.markCurrentKeyAsSuccessful();
-        
-        // LOG ACTUAL RESPONSE CONTENT
-        this.logger.log(`✅ [BytezService] API call successful`);
-        this.logger.log(`   Input tokens: ${data.provider?.usage?.input_tokens || 0}`);
-        this.logger.log(`   Output tokens: ${data.provider?.usage?.output_tokens || 0}`);
-        
-        // LOG ACTUAL RESPONSE CONTENT (truncated to avoid huge logs)
-        this.logger.log(`📝 [BytezService] Response content:`);
-        const outputPreview = JSON.stringify(data.output, null, 2).substring(0, 500);
-        this.logger.log(outputPreview + (outputPreview.length >= 500 ? '\n...[truncated]' : ''));
         
         return {
           contentBlocks: this.formatBytezResponse(data.output),
@@ -293,10 +225,6 @@ export class BytezService implements BytebotAgentService {
   private formatMessagesForBytez(messages: Message[], systemPrompt: string): any[] {
     const bytezMessages: any[] = [];
 
-    this.logger.debug(`formatMessagesForBytez called with ${messages.length} messages`);
-    this.logger.debug(`System prompt length: ${systemPrompt?.length || 0}`);
-    this.logger.debug(`Input messages structure: ${JSON.stringify(messages.map(m => ({ role: m.role, contentType: typeof m.content, contentLength: Array.isArray(m.content) ? m.content.length : 'not-array' })))}`);
-
     // Add system prompt as first message
     if (systemPrompt) {
       bytezMessages.push({
@@ -306,9 +234,7 @@ export class BytezService implements BytebotAgentService {
     }
 
     for (const message of messages) {
-      this.logger.debug(`Processing message with role: ${message.role}`);
       const messageContentBlocks = message.content as MessageContentBlock[];
-      this.logger.debug(`Content blocks: ${messageContentBlocks?.length || 'null/undefined'}`);
 
       // Handle user action blocks
       if (
@@ -460,12 +386,10 @@ export class BytezService implements BytebotAgentService {
 
       // Skip tool result messages as they were already added above
       if (messageContentBlocks.some(b => b.type === MessageContentType.ToolResult)) {
-        this.logger.debug(`Skipping message - contains ToolResult`);
         continue;
       }
 
       if (message.role === Role.ASSISTANT) {
-        this.logger.debug(`Processing ASSISTANT message - toolCalls: ${toolCalls.length}, hasImage: ${hasImage}, contentParts: ${contentParts.length}, textParts: ${textParts.length}`);
         const assistantMessage: any = {
           role: 'assistant',
         };
@@ -484,31 +408,16 @@ export class BytezService implements BytebotAgentService {
           bytezMessages.push(assistantMessage);
         }
       } else if (message.role === Role.USER) {
-        this.logger.debug(`Adding USER message - hasImage: ${hasImage}, contentParts: ${contentParts.length}, textParts: ${textParts.length}`);
         if (hasImage && contentParts.length > 0) {
           // Validate content parts before adding
           const validContentParts = contentParts.filter(part => {
-            if (!part || typeof part !== 'object') {
-              this.logger.warn(`Invalid content part (not an object): ${typeof part}`);
-              return false;
-            }
-            if (!part.type) {
-              this.logger.warn(`Content part missing type`);
-              return false;
-            }
-            if (part.type === 'text' && !part.text) {
-              this.logger.warn(`Text content part missing text field`);
-              return false;
-            }
-            if (part.type === 'image' && !part.url) {
-              this.logger.warn(`Image content part missing url field`);
-              return false;
-            }
-            return true;
+            return part && typeof part === 'object' && part.type && 
+              (part.type !== 'text' || part.text) && 
+              (part.type !== 'image' || part.url);
           });
 
           if (validContentParts.length === 0) {
-            this.logger.error(`All content parts were invalid! Count: ${contentParts.length}, Types: ${contentParts.map(p => p?.type || 'unknown').join(', ')}`);
+            this.logger.error(`All content parts invalid! Count: ${contentParts.length}`);
             throw new Error('Cannot create USER message with no valid content parts');
           }
 
@@ -521,17 +430,13 @@ export class BytezService implements BytebotAgentService {
             role: 'user',
             content: textParts.join('\n\n'),
           });
-        } else {
-          this.logger.warn(`USER message skipped - no content to add`);
         }
       }
     }
 
-    this.logger.debug(`formatMessagesForBytez returning ${bytezMessages.length} messages`);
-    this.logger.debug(`Message roles: ${bytezMessages.map(m => m.role).join(', ')}`);
     if (bytezMessages.length === 0) {
       this.logger.error('formatMessagesForBytez produced EMPTY messages array!');
-      this.logger.error(`Input messages: ${JSON.stringify(messages, null, 2)}`);
+      throw new Error('Message formatting produced empty array');
     }
 
     return bytezMessages;

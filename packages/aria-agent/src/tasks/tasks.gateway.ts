@@ -29,11 +29,11 @@ export class TasksGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {}
 
   handleConnection(client: Socket) {
-    this.logger.log({ event: 'ws.connected', clientId: client.id }, `Client connected`);
+    this.logger.debug({ event: 'ws.connected', clientId: client.id }, `Client connected`);
   }
 
   handleDisconnect(client: Socket) {
-    this.logger.log({ event: 'ws.disconnected', clientId: client.id }, `Client disconnected`);
+    this.logger.debug({ event: 'ws.disconnected', clientId: client.id }, `Client disconnected`);
   }
 
   @SubscribeMessage('join_task')

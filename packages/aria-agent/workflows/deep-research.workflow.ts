@@ -8,12 +8,13 @@ import * as openWhatsappWorkflow from './open-whatsapp.workflow';
 export const metadata: WorkflowMetadata = {
   name: 'deep-research',
   description:
-    'Searches a topic on DuckDuckGo, uses AI to pick the best links (max 3), scrapes each page, generates a research report, saves it as a file, and optionally sends it via Gmail and/or WhatsApp.',
-  version: '1.4.0',
-  timeout_ms: 180000,
+    'Uses AI to generate multiple targeted search queries, searches each independently (Bing → Google fallback), picks the single best content-rich URL per query, scrapes each, generates a research report, saves it as a file, and optionally sends it via Gmail and/or WhatsApp.',
+  version: '2.0.0',
+  timeout_ms: 240000,
   variables: [
     { name: 'topic', type: 'string', required: true, description: 'Research topic. NOT a URL. E.g. "quantum computing breakthroughs 2025"' },
-    { name: 'max_links', type: 'number', required: false, description: 'How many links to scrape (1–3). Default: 3.', default: 3 },
+    { name: 'max_links', type: 'number', required: false, description: 'How many distinct search queries to run (1–3). Default: 3.', default: 3 },
+    { name: 'include_wikipedia', type: 'boolean', required: false, description: 'Include Wikipedia as first source (default: true)', default: true },
     { name: 'email_to', type: 'string', required: false, description: 'Send report to this email. Leave empty to skip.' },
     { name: 'email_cc', type: 'string', required: false, description: 'CC this email (optional).' },
     { name: 'email_bcc', type: 'string', required: false, description: 'BCC this email (optional).' },
@@ -27,7 +28,7 @@ export const metadata: WorkflowMetadata = {
 // ─────────────────────────────────────────────────────────────────────────────
 // GROQ — with key rotation across GROQ_API_KEY_1 … _10 → GROQ_API_KEY
 // ─────────────────────────────────────────────────────────────────────────────
-async function callGroq(systemPrompt: string, userContent: string): Promise<string> {
+async function callGroq(systemPrompt: string, userContent: string, maxTokens = 8000): Promise<string> {
   const keys: string[] = [];
   for (let i = 1; i <= 10; i++) {
     const k = process.env[`GROQ_API_KEY_${i}`];
@@ -42,29 +43,187 @@ async function callGroq(systemPrompt: string, userContent: string): Promise<stri
     try {
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-          model: 'openai/gpt-oss-20b',
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userContent }],
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent },
+          ],
           temperature: 0.3,
-          max_tokens: 4096,
+          max_tokens: maxTokens,
         }),
       });
       const raw = await res.text();
       const data = raw ? JSON.parse(raw) : {};
       if (res.status === 429 || res.status === 402) {
-        console.log(`⚠️ Key ...${apiKey.slice(-6)} rate limited, trying next…`);
+        console.log(`  ⚠️  Key ...${apiKey.slice(-6)} rate limited, trying next…`);
         lastError = new Error(`Rate limited: ${data?.error?.message || res.status}`);
         continue;
       }
       if (!res.ok) throw new Error(`Groq ${res.status}: ${data?.error?.message || raw}`);
-      return data.choices[0].message.content as string;
+
+      const content: string = data.choices[0].message.content ?? '';
+      // Strip control characters — keep printable ASCII + common Unicode + newline/tab
+      return content.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
     } catch (err: any) {
       lastError = err;
-      console.log(`⚠️ Groq key error: ${err.message}`);
+      console.log(`  ⚠️  Groq key error: ${err.message}`);
     }
   }
   throw new Error(`All Groq keys exhausted. Last: ${lastError.message}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Strips non-ASCII and common UTF-8 garbage that causes Mousepad encoding issues.
+ * Keeps: printable ASCII (0x20–0x7E), tab (0x09), newline (0x0A), carriage return (0x0D).
+ * Everything else — box-drawing chars, smart quotes, em-dashes, etc. — is replaced
+ * with plain ASCII equivalents or removed.
+ */
+function toSafeAscii(text: string): string {
+  return text
+    // Normalize line endings first
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    // Smart quotes → straight quotes
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    // Em/en dash → hyphen
+    .replace(/[\u2013\u2014]/g, '-')
+    // Ellipsis → three dots
+    .replace(/\u2026/g, '...')
+    // Bullet variants → hyphen
+    .replace(/[\u2022\u2023\u25E6\u2043\u2219]/g, '-')
+    // Non-breaking space → space
+    .replace(/\u00A0/g, ' ')
+    // Any remaining non-ASCII character → removed
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, '')
+    // Collapse more than 2 consecutive blank lines
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Domains whose pages are mostly landing pages / paywalls / nav-heavy — avoid as content sources */
+const JUNK_DOMAINS = [
+  'youtube.com', 'youtu.be',
+  'reddit.com', 'twitter.com', 'x.com', 'facebook.com',
+  'instagram.com', 'tiktok.com', 'linkedin.com',
+  'pinterest.com', 'tumblr.com',
+  'amazon.com', 'ebay.com', 'etsy.com',
+  'bing.com', 'microsoft.com', 'google.com', 'googleusercontent.com',
+  'apple.com/app-store', 'play.google.com',
+  // Landing-page heavy tech giants (their landing pages, not their docs/blogs)
+  // We keep ibm.com/think, ibm.com/topics etc. — so we block only the root
+];
+
+/** Returns true if the URL is likely a content-rich article/doc page */
+function isGoodContentUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    const path = u.pathname;
+
+    // Hard-block junk domains
+    if (JUNK_DOMAINS.some(d => host.includes(d))) return false;
+
+    // Block root/near-root pages that are almost certainly landing pages
+    // e.g. ibm.com/in-en, ibm.com/, company.com/products
+    const pathDepth = path.split('/').filter(Boolean).length;
+    if (pathDepth < 2 && !['wikipedia.org', 'arxiv.org', 'nature.com'].includes(host)) {
+      // Allow shallow paths only for known always-good domains
+      const alwaysGood = ['wikipedia.org', 'arxiv.org', 'nature.com', 'science.org', 'pubmed.ncbi.nlm.nih.gov'];
+      if (!alwaysGood.some(d => host.includes(d))) return false;
+    }
+
+    // Prefer URLs that look like articles
+    const goodSignals = [
+      /\/(article|blog|post|news|research|paper|report|guide|tutorial|docs?|learn|insight|story|topic|explainer|analysis|review|feature)\//i,
+      /\/\d{4}\//, // date-based paths like /2024/03/...
+      /\.(html|htm)$/i,
+    ];
+    // URLs with good signals are always accepted (unless already blocked above)
+    if (goodSignals.some(re => re.test(path))) return true;
+
+    // For everything else with path depth >= 2, allow
+    return pathDepth >= 2;
+  } catch {
+    return false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEARCH ONE QUERY → return candidate links
+// ─────────────────────────────────────────────────────────────────────────────
+async function searchQuery(
+  query: string,
+  pinchTab: any,
+): Promise<{ title: string; url: string }[]> {
+  const engines = [
+    {
+      name: 'Bing',
+      url: `https://www.bing.com/search?q=${encodeURIComponent(query)}`,
+      excludeDomains: ['bing.com', 'microsoft.com'],
+    },
+    {
+      name: 'Google',
+      url: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
+      excludeDomains: ['google.com', 'googleusercontent.com'],
+    },
+  ];
+
+  for (const engine of engines) {
+    console.log(`    🔎 Trying ${engine.name} for: "${query}"`);
+    try {
+      await pinchTab.navigate(engine.url);
+      await pinchTab.wait(9000);
+
+      let candidates: { title: string; url: string }[] = [];
+
+      // --- Attempt 1: snapshot ---
+      try {
+        const snap = await pinchTab.snapshot('all');
+        const elements: any[] = snap.nodes || snap.elements || snap.data?.nodes || snap.data?.elements || [];
+        const seen = new Set<string>();
+        for (const el of elements) {
+          const href = el.url || el.href || el.attributes?.href || el.attributes?.url || (el.role === 'link' ? el.value : undefined);
+          if (href && typeof href === 'string' && href.startsWith('http') && !seen.has(href)) {
+            const excluded = engine.excludeDomains.some(d => href.includes(d));
+            if (!excluded) {
+              seen.add(href);
+              candidates.push({ title: (el.text || el.name || '').trim(), url: href });
+            }
+          }
+        }
+        console.log(`      📋 Snapshot links: ${candidates.length}`);
+      } catch (snapErr: any) {
+        console.log(`      ⚠️  Snapshot failed: ${snapErr.message}`);
+      }
+
+      // --- Attempt 2: getPageText fallback ---
+      if (candidates.length === 0) {
+        console.log(`      ↩️  Falling back to getPageText()…`);
+        const pageText = await pinchTab.getPageText();
+        const excludePat = engine.excludeDomains.map(d => d.replace('.', '\\.')).join('|');
+        const urlRe = new RegExp(`https?:\\/\\/(?!(?:${excludePat}))[^\\s"'<>)]+`, 'g');
+        const found = [...new Set<string>((pageText || '').match(urlRe) || [])];
+        for (const url of found) candidates.push({ title: '', url });
+        console.log(`      📋 Text-extracted links: ${candidates.length}`);
+      }
+
+      if (candidates.length > 0) return candidates;
+    } catch (err: any) {
+      console.log(`    ⚠️  ${engine.name} failed: ${err.message}`);
+    }
+  }
+
+  return [];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,6 +233,7 @@ export async function execute(
   variables: {
     topic: string;
     max_links?: number;
+    include_wikipedia?: boolean;
     email_to?: string;
     email_cc?: string;
     email_bcc?: string;
@@ -85,202 +245,393 @@ export async function execute(
   services: WorkflowServices,
 ): Promise<WorkflowResult> {
   const { pinchTab, desktop } = services;
-  const { 
-    topic, 
-    max_links = 3, 
-    email_to, 
-    email_cc, 
-    email_bcc, 
+  const {
+    topic,
+    max_links = 3,
+    include_wikipedia = true,
+    email_to,
+    email_cc,
+    email_bcc,
     email_sender_name = 'Aria Research',
     email_button_text = '',
     email_button_url = '',
-    whatsapp_to 
+    whatsapp_to,
   } = variables;
-  const linkCount = Math.min(Math.max(1, max_links), 3);
+  const queryCount = Math.min(Math.max(1, max_links), 3);
 
   try {
-    // ── STEP 1: Search with retry logic (DuckDuckGo → DuckDuckGo retry → Bing) ─
-    console.log(`🔍 Step 1: Searching for "${topic}"…`);
-
-    const instance = await pinchTab.launchInstance(`deep-research-${Date.now()}`, 'headed');
-    pinchTab.setCurrentInstance(instance.id);
-    await pinchTab.wait(3000); // Let browser fully init before opening tab
-
-    let candidateLinks: { title: string; url: string }[] = [];
-    const searchEngines = [
-      { name: 'DuckDuckGo', url: `https://duckduckgo.com/?q=${encodeURIComponent(topic)}&ia=web`, excludeDomains: ['duckduckgo.com', 'duck.co'] },
-      { name: 'DuckDuckGo (retry)', url: `https://duckduckgo.com/?q=${encodeURIComponent(topic)}&ia=web`, excludeDomains: ['duckduckgo.com', 'duck.co'] },
-      { name: 'Bing', url: `https://www.bing.com/search?q=${encodeURIComponent(topic)}`, excludeDomains: ['bing.com', 'microsoft.com'] },
-    ];
-
-    for (const engine of searchEngines) {
-      console.log(`🔍 Trying ${engine.name}...`);
+    // ── STEP 0: Scrape Wikipedia first (if enabled) ───────────────────────────
+    const scrapedPages: { url: string; content: string }[] = [];
+    
+    if (include_wikipedia) {
+      console.log(`\n📚 Step 0: Scraping Wikipedia for foundational context…`);
+      
+      // Launch browser for Wikipedia
+      console.log(`  🌐 Launching browser…`);
+      const instance = await pinchTab.launchInstance(`deep-research-${Date.now()}`, 'headed');
+      pinchTab.setCurrentInstance(instance.id);
+      await pinchTab.wait(3000);
       
       try {
-        await pinchTab.navigate(engine.url);
-        await pinchTab.wait(6000);
-
-        const snap = await pinchTab.snapshot('all') as any;
-        const elements: any[] = snap.nodes || snap.elements || snap.data?.nodes || snap.data?.elements || [];
-        console.log(`📋 ${engine.name} - Snapshot keys: ${Object.keys(snap).join(', ')} | Elements: ${elements.length}`);
-        if (elements.length > 0) console.log(`📋 Sample: ${JSON.stringify(elements[0]).slice(0, 150)}`);
-
-        // Try all possible href locations PinchTab might use
-        const seenUrls = new Set<string>();
+        // Navigate to Wikipedia homepage
+        console.log(`  🏠 Navigating to Wikipedia homepage…`);
+        await pinchTab.navigate('https://en.wikipedia.org');
+        await pinchTab.wait(5000);
+        
+        // Type the search query in the search box
+        console.log(`  🔍 Typing search query: "${topic}"…`);
+        await pinchTab.type('#searchInput', topic);
+        await pinchTab.wait(1000);
+        
+        // Press Enter or click search button
+        console.log(`  ⏎ Submitting search…`);
+        await pinchTab.press('Enter');
+        await pinchTab.wait(8000); // Wait for search results/article to load
+        
+        // Take snapshot to extract all text and links
+        console.log(`  📸 Taking snapshot to extract content…`);
+        const snapshot = await pinchTab.snapshot('all');
+        
+        // Extract text content from snapshot
+        const elements: any[] = snapshot.elements || [];
+        let wikiText = '';
+        const wikiLinks: string[] = [];
+        
+        // Collect all text and links from snapshot
         for (const el of elements) {
-          const href = el.url || el.href || el.attributes?.href || el.attributes?.url || (el.role === 'link' ? el.value : undefined);
-          if (href && typeof href === 'string' && href.startsWith('http') && !seenUrls.has(href)) {
-            // Check if URL should be excluded
-            const shouldExclude = engine.excludeDomains.some(domain => href.includes(domain));
-            if (!shouldExclude) {
-              seenUrls.add(href);
-              candidateLinks.push({ title: (el.text || el.name || '').trim(), url: href });
+          // Extract text content
+          if (el.text && typeof el.text === 'string' && el.text.trim().length > 0) {
+            wikiText += el.text.trim() + ' ';
+          }
+          
+          // Extract links for reference
+          const href = el.attributes?.href;
+          if (href && typeof href === 'string' && href.startsWith('http') && href.includes('wikipedia.org')) {
+            if (!wikiLinks.includes(href)) {
+              wikiLinks.push(href);
             }
           }
         }
-        console.log(`📋 ${engine.name} - Links via snapshot: ${candidateLinks.length}`);
-
-        // Fallback: extract URLs from page text
-        if (candidateLinks.length === 0) {
-          console.log(`⚠️ ${engine.name} - No links in snapshot, trying getPageText() fallback…`);
-          const pageText = await pinchTab.getPageText();
-          console.log(`📋 Page text length: ${(pageText || '').length}`);
-          
-          // Build regex pattern to exclude domains
-          const excludePattern = engine.excludeDomains.map(d => d.replace('.', '\\.')).join('|');
-          const urlRegex = new RegExp(`https?:\\/\\/(?!${excludePattern})[^\\s"'<>)]+`, 'g');
-          const found = [...new Set((pageText || '').match(urlRegex) || [])];
-          console.log(`📋 ${engine.name} - URLs from page text: ${found.length}`);
-          for (const url of found) candidateLinks.push({ title: '', url });
-        }
-
-        // If we found links, break out of retry loop
-        if (candidateLinks.length > 0) {
-          console.log(`✅ Step 1 done using ${engine.name}. ${candidateLinks.length} candidate links.`);
-          break;
+        
+        // Get current URL by listing tabs and finding the active one
+        const tabs = await pinchTab.listTabs(instance.id);
+        const activeTab = tabs.find((t: any) => t.active || t.id === pinchTab.getCurrentTabId());
+        const wikiUrl = activeTab?.url || 'https://en.wikipedia.org';
+        
+        console.log(`  📄 Extracted ${wikiText.length} chars of text from snapshot`);
+        console.log(`  🔗 Found ${wikiLinks.length} Wikipedia links`);
+        
+        // Clean and limit the content
+        const wikiContent = toSafeAscii(wikiText).slice(0, 6000);
+        
+        if (wikiContent.length > 100) {
+          scrapedPages.push({ url: wikiUrl, content: wikiContent });
+          console.log(`  ✅ Wikipedia scraped: ${wikiContent.length} chars from ${wikiUrl}`);
         } else {
-          console.log(`⚠️ ${engine.name} returned no links, trying next search engine...`);
+          console.log(`  ⚠️  Wikipedia content too short, trying fallback with getPageText…`);
+          
+          // Fallback: use getPageText if snapshot didn't capture enough
+          const fallbackText = await pinchTab.getPageText();
+          const fallbackContent = toSafeAscii(fallbackText.slice(0, 6000));
+          
+          if (fallbackContent.length > 100) {
+            scrapedPages.push({ url: wikiUrl, content: fallbackContent });
+            console.log(`  ✅ Wikipedia scraped (fallback): ${fallbackContent.length} chars`);
+          } else {
+            console.log(`  ⚠️  Wikipedia page too short or not found, skipping`);
+          }
         }
-      } catch (err: any) {
-        console.log(`⚠️ ${engine.name} failed: ${err.message}, trying next search engine...`);
+      } catch (error: any) {
+        console.log(`  ⚠️  Failed to scrape Wikipedia: ${error.message}`);
+        // Continue anyway - Wikipedia is optional
+      }
+      
+      console.log(`✅ Step 0 done. Wikipedia ${scrapedPages.length > 0 ? 'added' : 'skipped'}.`);
+    }
+
+    // ── STEP 1: AI generates diverse search queries ───────────────────────────
+    console.log(`\n🧠 Step 1: Generating ${queryCount} targeted search queries for "${topic}"…`);
+
+    const queryRaw = await callGroq(
+      `You are someone who is really curious about a topic and knows how to search the web well.
+Your job: given a topic, write ${queryCount} search queries that a smart, curious person would actually type into Google or Bing.
+
+Think like this — if someone told you about a topic and you wanted to learn about it, what would YOU search?
+- Mix it up: one query for a general explainer/overview, one for recent news or updates, one for a deep-dive or "how it works" angle
+- Write them like a human — short, natural, conversational. E.g. "how does X work", "X explained simply", "X latest news 2025", "best blogs about X", "X real world examples"
+- It is totally fine to add words like: "explained", "guide", "blog", "overview", "2024", "2025", "how it works", "what is", "examples", "breakdown"
+- Do NOT use any search operators like site:, filetype:, intitle:, quotes, or anything technical
+- Do NOT target academic papers or government sites specifically — just search naturally like anyone would
+- Each query should feel different and explore a different angle
+
+Return ONLY valid JSON, no markdown, no explanation.
+Format: {"queries": ["query 1", "query 2", "query 3"]}`,
+      `Topic: "${topic}"\n\nWrite exactly ${queryCount} natural search queries a curious person would type. Return JSON only.`,
+      500,
+    );
+
+    let searchQueries: string[] = [];
+    try {
+      const parsed = JSON.parse(queryRaw.replace(/```json|```/g, '').trim());
+      searchQueries = (parsed.queries || []).slice(0, queryCount);
+    } catch {
+      // Fallback: natural human-style queries
+      searchQueries = [
+        `what is ${topic} explained`,
+        `${topic} latest news 2025`,
+        `how does ${topic} work real world examples`,
+      ].slice(0, queryCount);
+    }
+    console.log(`  ✅ Queries: ${searchQueries.map((q, i) => `\n    ${i + 1}. ${q}`).join('')}`);
+
+    // ── STEP 2: Launch browser (if not already launched in Step 0) ────────────
+    if (!include_wikipedia || scrapedPages.length === 0) {
+      console.log(`\n🌐 Step 2: Launching browser…`);
+      const instance = await pinchTab.launchInstance(`deep-research-${Date.now()}`, 'headed');
+      pinchTab.setCurrentInstance(instance.id);
+      await pinchTab.wait(3000);
+    } else {
+      console.log(`\n🌐 Step 2: Browser already launched (reusing from Step 0)…`);
+    }
+
+    // ── STEP 3: For each query → search → AI picks best 1 content URL ────────
+    console.log(`\n🔍 Step 3: Running ${queryCount} searches and picking best content URL per query…`);
+    const chosenUrls: string[] = [];
+    const usedDomains = new Set<string>();
+
+    for (let qi = 0; qi < searchQueries.length; qi++) {
+      const query = searchQueries[qi];
+      console.log(`\n  [Query ${qi + 1}/${searchQueries.length}]: "${query}"`);
+
+      const candidates = await searchQuery(query, pinchTab);
+      if (candidates.length === 0) {
+        console.log(`  ⚠️  No candidates found for this query, skipping.`);
+        continue;
+      }
+
+      // Pre-filter: remove obvious junk and already-used domains
+      const filtered = candidates.filter(c => {
+        if (!isGoodContentUrl(c.url)) return false;
+        try {
+          const host = new URL(c.url).hostname.replace(/^www\./, '');
+          if (usedDomains.has(host)) return false;
+        } catch { return false; }
+        return true;
+      });
+
+      console.log(`  📊 Good-URL candidates after filter: ${filtered.length} / ${candidates.length}`);
+
+      if (filtered.length === 0) {
+        // Relax filter — just deduplicate domains
+        const relaxed = candidates.filter(c => {
+          try {
+            const host = new URL(c.url).hostname.replace(/^www\./, '');
+            return !usedDomains.has(host);
+          } catch { return false; }
+        });
+        if (relaxed.length > 0) filtered.push(...relaxed.slice(0, 20));
+      }
+
+      if (filtered.length === 0) {
+        console.log(`  ⚠️  Still no usable candidates, skipping query.`);
+        continue;
+      }
+
+      // Ask AI to pick the single best URL for actual content
+      const pickRaw = await callGroq(
+        `You are a research librarian. Your job is to pick the SINGLE BEST URL from a list that will contain the most detailed, informative content about the search query.
+
+CRITICAL RULES:
+- Pick URLs that point to ARTICLES, BLOG POSTS, RESEARCH PAPERS, DOCUMENTATION PAGES, WIKIPEDIA ARTICLES, or NEWS STORIES
+- REJECT: landing pages, product homepages, category pages, login pages, paywalled content
+- REJECT: URLs with path depth < 2 (e.g. ibm.com/in-en is a landing page — BAD; ibm.com/think/topics/quantum-computing is an article — GOOD)
+- PREFER: URLs containing words like /article/, /blog/, /research/, /paper/, /docs/, /wiki/, /news/, /guide/, /explainer/, or a date like /2024/
+- If none are perfect, pick the one most likely to have real written content
+
+Return ONLY valid JSON: {"url": "https://..."} or {"url": null} if nothing is usable.`,
+        `Search query: "${query}"\n\nCandidate URLs (title | URL):\n${filtered.slice(0, 25).map(c => `${c.title || '(no title)'} | ${c.url}`).join('\n')}\n\nPick the single best content-rich URL. JSON only.`,
+        300,
+      );
+
+      let picked: string | null = null;
+      try {
+        const p = JSON.parse(pickRaw.replace(/```json|```/g, '').trim());
+        picked = p.url || null;
+      } catch {
+        // Try to extract URL from raw text as last resort
+        const m = pickRaw.match(/https?:\/\/[^\s"']+/);
+        picked = m ? m[0] : null;
+      }
+
+      if (picked && isGoodContentUrl(picked)) {
+        // Check domain not already used
+        try {
+          const host = new URL(picked).hostname.replace(/^www\./, '');
+          if (!usedDomains.has(host)) {
+            usedDomains.add(host);
+            chosenUrls.push(picked);
+            console.log(`  ✅ Picked: ${picked}`);
+          } else {
+            console.log(`  ⚠️  Domain already used (${host}), skipping.`);
+          }
+        } catch {
+          chosenUrls.push(picked);
+          console.log(`  ✅ Picked: ${picked}`);
+        }
+      } else if (picked) {
+        // AI picked something but isGoodContentUrl rejected it — trust AI anyway
+        console.log(`  ⚠️  AI picked URL didn't pass filter, using it anyway: ${picked}`);
+        try {
+          const host = new URL(picked).hostname.replace(/^www\./, '');
+          if (!usedDomains.has(host)) {
+            usedDomains.add(host);
+            chosenUrls.push(picked);
+          }
+        } catch {
+          chosenUrls.push(picked);
+        }
+      } else {
+        console.log(`  ⚠️  AI returned null, falling back to first filtered candidate.`);
+        const fallback = filtered[0];
+        if (fallback) {
+          try {
+            const host = new URL(fallback.url).hostname.replace(/^www\./, '');
+            if (!usedDomains.has(host)) {
+              usedDomains.add(host);
+              chosenUrls.push(fallback.url);
+              console.log(`  ✅ Fallback: ${fallback.url}`);
+            }
+          } catch {
+            chosenUrls.push(fallback.url);
+          }
+        }
       }
     }
 
-    // If still no links after all retries, fail
-    if (candidateLinks.length === 0) {
-      return { success: false, error: 'No links found after trying DuckDuckGo (2x) and Bing.', message: 'All search engines returned no results. Try a different topic.' };
+    if (chosenUrls.length === 0) {
+      return {
+        success: false,
+        error: 'No usable URLs found after all searches.',
+        message: 'All searches returned only landing pages or no results. Try rephrasing your topic.',
+      };
     }
 
-    // ── STEP 2: AI picks best links ───────────────────────────────────────────
-    console.log(`🤖 Step 2: AI picking best ${linkCount} links…`);
+    console.log(`\n✅ Step 3 done. Selected ${chosenUrls.length} URLs:`);
+    chosenUrls.forEach((u, i) => console.log(`  ${i + 1}. ${u}`));
 
-    const pickRaw = await callGroq(
-      `You are a research assistant. Pick the best URLs from search results for a topic.
-Prefer: news articles, official docs, research papers, reputable blogs, Wikipedia.
-Avoid: YouTube, Reddit, Twitter, LinkedIn, paywalled or login-required pages.
-Return ONLY valid JSON. No markdown. Format: {"links": ["https://...", "https://..."]}`,
-      `Topic: "${topic}"\n\nLinks (title | URL):\n${candidateLinks.slice(0, 30).map(l => `${l.title} | ${l.url}`).join('\n')}\n\nPick best ${linkCount}. JSON only.`
-    );
-
-    let chosenUrls: string[] = [];
-    try {
-      chosenUrls = (JSON.parse(pickRaw.replace(/```json|```/g, '').trim()).links || []).slice(0, linkCount);
-    } catch {
-      console.log('⚠️ AI JSON parse failed, using first candidates.');
-      chosenUrls = [...new Set(candidateLinks.map(l => l.url))].slice(0, linkCount);
-    }
-    console.log(`✅ Step 2 done. Chose: ${chosenUrls.join(', ')}`);
-
-    // ── STEP 3: Scrape each link ──────────────────────────────────────────────
-    console.log(`🌐 Step 3: Scraping ${chosenUrls.length} pages…`);
-    const scrapedPages: { url: string; content: string }[] = [];
+    // ── STEP 4: Scrape each chosen URL (append to existing scrapedPages from Step 0) ────
+    console.log(`\n📄 Step 4: Scraping ${chosenUrls.length} pages…`);
+    // Note: scrapedPages already declared in Step 0, just append to it
 
     for (let i = 0; i < chosenUrls.length; i++) {
       const url = chosenUrls[i];
-      console.log(`  📄 (${i + 1}/${chosenUrls.length}): ${url}`);
+      console.log(`  (${i + 1}/${chosenUrls.length}): ${url}`);
       try {
         await pinchTab.navigate(url);
-        await pinchTab.wait(4000);
-        const text = (await pinchTab.getPageText() || '').slice(0, 6000);
-        scrapedPages.push({ url, content: text });
-        console.log(`  ✅ ${text.length} chars`);
+        await pinchTab.wait(8000);
+        const raw = (await pinchTab.getPageText()) || '';
+        // Trim to 6000 chars and strip to safe ASCII right here
+        const content = toSafeAscii(raw).slice(0, 6000);
+        scrapedPages.push({ url, content });
+        console.log(`    ✅ Scraped ${content.length} chars`);
       } catch (err: any) {
-        console.log(`  ⚠️ Failed: ${err.message}`);
-        scrapedPages.push({ url, content: '[Failed to load]' });
+        console.log(`    ⚠️  Failed to scrape: ${err.message}`);
+        scrapedPages.push({ url, content: '[Page could not be loaded]' });
       }
     }
-    console.log(`✅ Step 3 done.`);
+    console.log(`✅ Step 4 done.`);
 
-    // ── STEP 4: AI generates report ───────────────────────────────────────────
-    console.log(`📝 Step 4: Generating report…`);
+    // ── STEP 5: AI generates research report ──────────────────────────────────
+    console.log(`\n📝 Step 5: Generating research report…`);
 
-    const report = await callGroq(
-      `You are an expert research analyst. Synthesise scraped web content into a structured report.
+    const today = new Date().toISOString().split('T')[0];
 
-Format EXACTLY like this:
+    const reportRaw = await callGroq(
+      `You are an expert research analyst. Write a detailed, well-structured research report.
 
-# Research Report: <Topic>
-Date: <today's date>
+CRITICAL FORMATTING RULES - READ CAREFULLY:
+1. Use ONLY standard ASCII characters (a-z, A-Z, 0-9, basic punctuation: . , : ; ! ? - _ ( ) [ ] / @ # % & * + = < > | ~ ^ )
+2. NO special Unicode characters, NO smart quotes, NO em-dashes, NO bullet symbols, NO box-drawing characters
+3. Use a plain hyphen (-) for bullet points, NOT a bullet symbol
+4. Use straight quotes (" and ') NOT smart quotes
+5. Use -- for em-dash, NOT Unicode em-dash
+6. Keep it plain text, no markdown formatting beyond # headings
+
+CRITICAL CITATION RULES:
+- ALWAYS cite Wikipedia if it appears in the sources (it will be SOURCE 1 if included)
+- Include Wikipedia citations in Key Findings and Detailed Analysis sections
+- Use format: [Source: URL] after each finding or claim
+- Make sure EVERY source provided is cited at least once in the report
+- Wikipedia is a foundational source - cite it prominently
+
+STRUCTURE (follow exactly):
+
+# Research Report: TOPIC_HERE
+Date: DATE_HERE
 
 ## TL;DR
-2-3 sentence summary.
+2-3 sentences summarizing the key takeaway.
 
 ## Key Findings
-- Finding 1 [Source: <url>]
-- Finding 2 [Source: <url>]
-(minimum 5 findings)
+- Finding 1 [Source: URL]
+- Finding 2 [Source: URL]
+- Finding 3 [Source: URL]
+- Finding 4 [Source: URL]
+- Finding 5 [Source: URL]
+
+(Make sure to cite Wikipedia if it's in the sources - it provides foundational context)
 
 ## Detailed Analysis
-3-5 paragraphs with inline source references.
+
+Write 4-6 paragraphs. Each paragraph covers a distinct aspect. Include inline source citations like [Source: URL].
+
+IMPORTANT: If Wikipedia is SOURCE 1, make sure to cite it in the first or second paragraph as it provides the foundational overview.
+
+## Conclusion
+2-3 sentence wrap-up.
 
 ## Sources
-1. <url1>
-2. <url2>
+1. URL1
+2. URL2
+3. URL3
+
+(List ALL sources provided, including Wikipedia if present)
 
 ---
 Report generated by Aria Deep Research`,
-      `Topic: "${topic}"\n\n${scrapedPages.map((p, i) => `--- SOURCE ${i + 1}: ${p.url} ---\n${p.content}`).join('\n\n')}\n\nGenerate the full research report now.`
+      `Topic: "${topic}"\nDate: ${today}\n\n${scrapedPages.map((p, i) => `--- SOURCE ${i + 1}: ${p.url} ---\n${p.content}`).join('\n\n')}\n\nWrite the full research report now. Plain ASCII text only. No Unicode symbols.`,
+      8000,
     );
 
-    console.log(`✅ Step 4 done. Report: ${report.length} chars.`);
+    if (!reportRaw || reportRaw.length < 100) {
+      throw new Error('Generated report is too short or empty.');
+    }
 
-    // ── STEP 5: Save to Desktop using Mousepad ────────────────────────────────
-    console.log(`💾 Step 5: Saving report via Mousepad…`);
-    
-    // Generate simple filename (e.g., "research-ai-agents.txt")
-    const safeTopicName = topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30);
+    // Final safety pass: convert everything to safe ASCII
+    const cleanReport = toSafeAscii(reportRaw);
+
+    console.log(`✅ Step 5 done. Report: ${cleanReport.length} chars.`);
+
+    // ── STEP 6: Save report using UI (create empty file, open, paste, save) ──
+    console.log(`\n💾 Step 6: Saving report via text editor…`);
+    const safeTopicName = topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30).replace(/-$/, '');
     const filename = `research-${safeTopicName}.txt`;
     const filePath = `/home/user/Desktop/${filename}`;
 
-    // Open Mousepad
-    console.log(`📝 Opening Mousepad...`);
-    await desktop.launchApplication('mousepad');
-    await desktop.wait(2000);
+    // Write file directly with base64 encoding (ariad expects base64)
+    console.log(`💾 Writing report to file: ${filename}`);
+    const base64Content = Buffer.from(cleanReport, 'utf-8').toString('base64');
+    const writeResult = await desktop.writeFile(filePath, base64Content);
+    
+    if (!writeResult.success) {
+      throw new Error(`Failed to write file: ${writeResult.path || filePath}`);
+    }
+    
+    console.log(`✅ Step 6 done. Saved: ${filePath} (${cleanReport.length} chars)`);
 
-    // Paste the report content
-    console.log(`📋 Pasting report content...`);
-    await desktop.pasteText(report);
-    await desktop.wait(1000);
-
-    // Save file: Ctrl+S
-    console.log(`💾 Saving file...`);
-    await desktop.pressKeys(['ctrl', 's']);
-    await desktop.wait(1500);
-
-    // Type filename in save dialog
-    console.log(`📝 Typing filename: ${filename}`);
-    await desktop.typeText(filename, 10);
-    await desktop.wait(500);
-
-    // Press Enter to save
-    await desktop.pressKeys(['Return']);
-    await desktop.wait(1000);
-
-    console.log(`✅ Step 5 done. Saved: ${filePath}`);
-
-    // ── STEP 6 (optional): Email via N8N — calls send-email-n8n workflow ─────
+    // ── STEP 7 (optional): Email ──────────────────────────────────────────────
     if (email_to) {
-      console.log(`📧 Step 6: Calling send-email-n8n workflow → ${email_to}…`);
+      console.log(`\n📧 Step 7: Sending email to ${email_to}…`);
       const emailResult = await sendEmailN8nWorkflow.execute(
         {
           to: email_to,
@@ -295,50 +646,45 @@ Report generated by Aria Deep Research`,
         },
         services,
       );
-      console.log(emailResult.success
-        ? `✅ Step 6 done. Email sent to ${email_to}`
-        : `⚠️ Step 6: ${emailResult.message}`
-      );
+      console.log(emailResult.success ? `✅ Step 7 done.` : `⚠️  Step 7: ${emailResult.message}`);
     }
 
-    // ── STEP 7 (optional): WhatsApp — calls open-whatsapp workflow directly ───
+    // ── STEP 8 (optional): WhatsApp ───────────────────────────────────────────
     if (whatsapp_to) {
-      console.log(`💬 Step 7: Calling open-whatsapp workflow → ${whatsapp_to}…`);
-
-      const reportLines = report.split('\n');
-      const tldrIdx = reportLines.findIndex(l => l.includes('TL;DR'));
-      const tldrText = tldrIdx >= 0 ? reportLines.slice(tldrIdx + 1, tldrIdx + 4).join(' ').trim() : '';
-      const keyFindings = reportLines.filter(l => l.startsWith('- ')).slice(0, 5).join('\n');
-
+      console.log(`\n💬 Step 8: Sending WhatsApp to ${whatsapp_to}…`);
+      const lines = cleanReport.split('\n');
+      const tldrIdx = lines.findIndex(l => l.includes('TL;DR'));
+      const tldrText = tldrIdx >= 0 ? lines.slice(tldrIdx + 1, tldrIdx + 4).join(' ').trim() : '';
+      const keyFindings = lines.filter(l => l.startsWith('- ')).slice(0, 5).join('\n');
       const waMessage =
-        `📊 *Research Report: ${topic}*\n\n` +
-        (tldrText ? `*Summary:* ${tldrText}\n\n` : '') +
-        `*Key Findings:*\n${keyFindings}\n\n` +
-        `_Full report: ${filename}_`;
-
-      const waResult = await openWhatsappWorkflow.execute(
-        { phone: whatsapp_to, messages: waMessage },
-        services,
-      );
-      console.log(waResult.success
-        ? `✅ Step 7 done. WhatsApp sent to ${whatsapp_to}`
-        : `⚠️ Step 7: ${waResult.message}`
-      );
+        `Research Report: ${topic}\n\n` +
+        (tldrText ? `Summary: ${tldrText}\n\n` : '') +
+        `Key Findings:\n${keyFindings}\n\n` +
+        `Full report saved as: ${filename}`;
+      const waResult = await openWhatsappWorkflow.execute({ phone: whatsapp_to, messages: waMessage }, services);
+      console.log(waResult.success ? `✅ Step 8 done.` : `⚠️  Step 8: ${waResult.message}`);
     }
 
-    // ── Done ─────────────────────────────────────────────────────────────────
+    // ── Done ──────────────────────────────────────────────────────────────────
     const deliveries = [`File: ${filename}`];
-    if (email_to) deliveries.push(`Email → ${email_to}`);
-    if (whatsapp_to) deliveries.push(`WhatsApp → ${whatsapp_to}`);
+    if (email_to) deliveries.push(`Email -> ${email_to}`);
+    if (whatsapp_to) deliveries.push(`WhatsApp -> ${whatsapp_to}`);
 
     return {
       success: true,
       message: `Research complete! Delivered via: ${deliveries.join(' | ')}`,
-      data: { topic, sources: chosenUrls, filePath, filename, reportLength: report.length, deliveries },
+      data: {
+        topic,
+        searchQueries,
+        sources: chosenUrls,
+        filePath,
+        filename,
+        reportLength: cleanReport.length,
+        deliveries,
+      },
     };
-
   } catch (error: any) {
-    console.error(`❌ deep-research failed: ${error.message}`);
+    console.error(`\n❌ deep-research failed: ${error.message}`);
     return { success: false, error: error.message, message: `Deep research failed: ${error.message}` };
   }
 }
