@@ -8,7 +8,10 @@ import { WorkflowService } from './src/services/workflow.service';
 import { PinchTabService } from './src/services/pinchtab.service';
 import { DesktopService } from './src/services/desktop.service';
 import { BrowserLoggerService } from './src/logger/browser-logger.service';
+import { MessagesService } from './src/messages/messages.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PrismaService } from './src/prisma/prisma.service';
+import { TasksGateway } from './src/tasks/tasks.gateway';
 
 async function testWorkflows() {
   console.log('🧪 Testing Workflow System\n');
@@ -21,7 +24,12 @@ async function testWorkflows() {
   const eventEmitter = new EventEmitter2();
   const browserLogger = new BrowserLoggerService(eventEmitter);
   
-  const workflowService = new WorkflowService(pinchTabService, desktopService, browserLogger);
+  // Create mock MessagesService for testing
+  const prismaService = new PrismaService();
+  const tasksGateway = {} as TasksGateway; // Mock gateway
+  const messagesService = new MessagesService(prismaService, tasksGateway);
+  
+  const workflowService = new WorkflowService(pinchTabService, desktopService, browserLogger, messagesService);
   
   try {
     // Test 1: List workflows

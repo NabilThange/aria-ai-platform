@@ -1,4 +1,5 @@
 import { BrowserLoggerService } from '../logger/browser-logger.service';
+import { MessagesService } from '../messages/messages.service';
 
 /**
  * Helper class to wrap workflow tool calls with logging
@@ -9,7 +10,24 @@ export class WorkflowLogger {
     private readonly browserLogger: BrowserLoggerService,
     private readonly taskId: string,
     private readonly workflowName: string,
+    private readonly messagesService?: MessagesService,
   ) {}
+
+  /**
+   * Emit a natural, conversational AI thinking message
+   * Makes the workflow feel alive by narrating what it's doing
+   * @param thinking - Natural language description of what the AI is thinking/doing
+   */
+  async think(thinking: string): Promise<void> {
+    if (this.messagesService) {
+      await this.messagesService.createAgentActionMessage(
+        this.taskId,
+        'WORKFLOW',
+        'thinking',
+        { thinking }
+      );
+    }
+  }
 
   /**
    * Wrap a tool call with logging

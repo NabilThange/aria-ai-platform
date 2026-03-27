@@ -18,19 +18,23 @@ export const metadata: WorkflowMetadata = {
 
 export async function execute(variables: any, services: WorkflowServices): Promise<WorkflowResult> {
   const { topic, email, documentType = 'ppt', includeYouTube = true, maxLinks = 3, maxVideos = 2 } = variables;
-  const { desktop, browserLogger, taskId } = services;
-  const logger = new WorkflowLogger(browserLogger, taskId, 'email-doc-deep-research');
+  const { desktop, browserLogger, taskId, messagesService } = services;
+  const logger = new WorkflowLogger(browserLogger, taskId, 'email-doc-deep-research', messagesService);
   
   const workflowStartTime = Date.now();
   let tempFilePath: string | null = null;
   
   try {
     
+    await logger.think(`Alright, let's tackle this research project about "${topic}"! I'll gather information from multiple sources and create a comprehensive ${documentType.toUpperCase()} document for you.`);
+    
     // ========================================
     // PHASE 1: Deep Web Research
     // ========================================
     console.log('📚 Phase 1: Deep web research...');
     checkRemainingTime(workflowStartTime, metadata.timeout_ms, 'web research');
+    
+    await logger.think(`First, I'll dive into web research. Let me search for the most relevant and up-to-date information about ${topic}...`);
     
     // Import and execute deep-research workflow
     const deepResearchWorkflow = await import('./deep-research.workflow');
@@ -46,6 +50,8 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     if (!webResult.success) throw new Error(`Web research failed: ${webResult.error}`);
     console.log(`✅ Web research completed: ${webResult.data.filePath}`);
     
+    await logger.think(`Great! I've gathered some solid web research. Found ${maxLinks} quality sources with detailed information.`);
+    
     // ========================================
     // PHASE 2: YouTube Research
     // ========================================
@@ -53,6 +59,8 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     if (includeYouTube) {
       console.log('🎥 Phase 2: YouTube research...');
       checkRemainingTime(workflowStartTime, metadata.timeout_ms, 'YouTube research');
+      
+      await logger.think(`Now let me check YouTube for video content. Visual explanations can add great depth to the research...`);
       
       // Import and execute youtube-demo workflow
       const youtubeWorkflow = await import('./youtube-demo.workflow');
@@ -62,12 +70,16 @@ export async function execute(variables: any, services: WorkflowServices): Promi
       
       if (youtubeResult.success) {
         console.log(`✅ YouTube research completed: ${youtubeResult.data?.videoCount ?? 0} videos`);
+        await logger.think(`Perfect! Found ${youtubeResult.data?.videoCount ?? 0} relevant videos. This will add some great multimedia perspective.`);
       } else {
         console.warn(`⚠️ YouTube research failed, continuing without it: ${youtubeResult.error}`);
+        await logger.think(`Hmm, couldn't get YouTube data this time, but no worries - the web research is solid enough to proceed.`);
       }
       
       // Close all PinchTab browser instances to avoid focus conflicts
       console.log('🧹 Closing all PinchTab browser instances...');
+      await logger.think(`Let me clean up the browser instances before moving to document generation...`);
+      
       try {
         const { pinchTab } = services;
         const instances = await pinchTab.listInstances();
@@ -95,6 +107,8 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     console.log('📝 Phase 3: Combining and summarizing research...');
     checkRemainingTime(workflowStartTime, metadata.timeout_ms, 'summarization');
     
+    await logger.think(`Now I'll combine all the research and distill it into the key insights. This is where the magic happens...`);
+    
     // Read web research file
     const webContent = await desktop.readFile(webResult.data.filePath);
     const webText = Buffer.from(webContent.content || '', 'base64').toString('utf-8');
@@ -120,14 +134,20 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     
     // Summarize with Groq AI
     console.log('🤖 Summarizing research with AI...');
+    await logger.think(`Let me analyze all this information and extract the most important points...`);
+    
     const summarizedResearch = await summarizeResearch(combinedText);
     console.log(`✅ Research summarized: ${summarizedResearch.length} chars`);
+    
+    await logger.think(`Excellent! I've identified the key findings. Now let's create a professional document with this information.`);
     
     // ========================================
     // PHASE 4: Generate Document
     // ========================================
     console.log('📄 Phase 4: Generating document with OpenCode...');
     checkRemainingTime(workflowStartTime, metadata.timeout_ms, 'document generation');
+    
+    await logger.think(`Time to create the ${documentType.toUpperCase()} document. I'll use OpenCode to generate a professional, well-structured document with all the research findings...`);
     
     const documentPrompt = buildOpenCodePrompt(topic, documentType, summarizedResearch);
     
@@ -147,6 +167,8 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     
     if (!docResult.success) throw new Error(`Document generation failed: ${docResult.error}`);
     console.log(`✅ OpenCode completed and sent emails`);
+    
+    await logger.think(`Perfect! The document is ready and I've sent it to ${email}. All done! 🎉`);
     
     // ========================================
     // SUCCESS - OpenCode handles everything (document creation + email sending)
@@ -171,6 +193,7 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     
   } catch (error: any) {
     console.error(`❌ Workflow failed: ${error.message}`);
+    await logger.think(`Oops, ran into an issue: ${error.message}. Let me try to recover...`);
     return {
       success: false,
       error: error.message,
@@ -181,6 +204,7 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     if (tempFilePath) {
       try {
         console.log(`🧹 Cleaning up temp file: ${tempFilePath}`);
+        await logger.think(`Just cleaning up some temporary files...`);
         
         // Open a fresh terminal for cleanup
         await logger.logToolCall('launchApplication', { application: 'terminal' }, () =>

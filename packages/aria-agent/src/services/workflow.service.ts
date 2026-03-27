@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PinchTabService } from './pinchtab.service';
 import { DesktopService } from './desktop.service';
 import { BrowserLoggerService } from '../logger/browser-logger.service';
+import { MessagesService } from '../messages/messages.service';
 import { WorkflowLoader } from '../workflows/workflow.loader';
 import {
   WorkflowMetadata,
@@ -25,6 +26,7 @@ export class WorkflowService {
     private readonly pinchTabService: PinchTabService,
     private readonly desktopService: DesktopService,
     private readonly browserLogger: BrowserLoggerService,
+    private readonly messagesService: MessagesService,
   ) {
     this.workflowLoader = new WorkflowLoader();
     // When running from dist/services/workflow.service.js:
@@ -135,6 +137,7 @@ export class WorkflowService {
         pinchTab: this.pinchTabService,
         desktop: this.desktopService,
         browserLogger: this.browserLogger,
+        messagesService: this.messagesService,
         taskId: taskId,
       };
       
