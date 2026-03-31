@@ -1,19 +1,16 @@
 # ARIA Multi-Agent System - Complete Architecture
 
 **Generated:** March 18, 2026  
-**Last Updated:** March 26, 2026 - **OpenCode Migration + Document Generation Capabilities**
-- **OpenCode Integration:** Replaced Kilocode with OpenCode CLI (installed via npm and curl method)
-- **Document Generation Libraries:** Added comprehensive document creation capabilities:
-  - **PowerPoint (.pptx):** pptxgenjs (Node.js) - installed globally
-  - **Word (.docx):** docx (Node.js) + python-docx (Python) - dual implementation
-  - **PDF (.pdf):** reportlab (Python) - programmatic PDF generation
-  - **Excel (.xlsx):** openpyxl (Python) - spreadsheet creation and manipulation
-- **LibreOffice Suite:** Installed Writer, Calc, and Impress for viewing/editing generated documents
-- **Document Utilities:** Added poppler-utils (PDF tools) and pandoc (document conversion)
-- **Desktop Shortcuts:** Added LibreOffice Writer, Calc, and Impress to desktop for easy access
-- **Workflow Migration:** Renamed kilocode-request.workflow.ts → opencode-request.workflow.ts with full OpenCode integration
+**Last Updated:** March 31, 2026 - **WebSocket Real-Time Messaging Fix**
+- **Issue:** Messages not appearing in chat until manual browser refresh
+- **Root Cause:** Frontend WebSocket path mismatch (`/api/proxy/tasks` vs `/socket.io`)
+- **Files Fixed:**
+  - `packages/aria-ui/src/hooks/useWebSocket.ts` - Changed path from `/api/proxy/tasks` to `/socket.io` and added `NEXT_PUBLIC_API_URL`
+  - `packages/aria-ui/src/hooks/useAgentStatus.ts` - Added missing `/socket.io` path parameter
+  - `packages/aria-ui/.env.example` - Added missing `NEXT_PUBLIC_API_URL` variable
+- **Impact:** Real-time messaging now works correctly - messages appear instantly without refresh
 
-Previous updates: Phase 0 Multi-Agent Improvements (Logging, PinchTab initialization, Orchestrator ReAct Loop, Web Agent conversation history, Recovery strategy integration, Step results passing); Updated Clarifier to never ask about email credentials; removed AgentQuestionContent UI component; enhanced Orchestrator planning with detailed examples; fixed agent config save 404 error; fixed desktop interaction on control page  
+Previous updates: March 31, 2026 - Agent Prompt Improvements (CLARIFIER + ORCHESTRATOR); March 26, 2026 - OpenCode Migration + Document Generation Capabilities; Phase 0 Multi-Agent Improvements  
 **Purpose:** Complete frontend-backend flow with exact tools, inputs, outputs, and context sources
 
 ---
@@ -2224,6 +2221,38 @@ export async function execute(
 ---
 
 ## WebSocket Events
+
+### Configuration (March 31, 2026 Fix)
+
+**Backend Gateway:**
+- **File:** `packages/aria-agent/src/tasks/tasks.gateway.ts`
+- **Path:** `/socket.io` (default Socket.io path)
+- **CORS:** Origin `*`, methods `['GET', 'POST']`
+
+**Frontend Hooks:**
+- **Files:** 
+  - `packages/aria-ui/src/hooks/useWebSocket.ts` (main chat WebSocket)
+  - `packages/aria-ui/src/hooks/useAgentStatus.ts` (agent status tracking)
+  - `packages/aria-ui/src/lib/socket.ts` (singleton instance)
+- **Configuration:**
+  ```typescript
+  io(process.env.NEXT_PUBLIC_API_URL!, {
+    path: "/socket.io",
+    transports: ["websocket"],
+    autoConnect: true,
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000,
+  })
+  ```
+
+**Environment Variables:**
+- `NEXT_PUBLIC_API_URL` - Backend URL for Socket.io connections (e.g., `http://localhost:9991`)
+- Must be set in `.env`, `.env.local`, `.env.production`, etc.
+
+**Common Pitfall (Fixed March 31, 2026):**
+- ❌ WRONG: `path: "/api/proxy/tasks"` - This was causing connection failures
+- ✅ CORRECT: `path: "/socket.io"` - Standard Socket.io path matching backend
 
 ### TasksGateway
 

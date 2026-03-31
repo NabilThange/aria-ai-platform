@@ -73,8 +73,8 @@ export function useWebSocket({
 
   // Create the socket exactly ONCE on mount — empty dep array guarantees this.
   useEffect(() => {
-    const socket = io({
-      path: "/api/proxy/tasks",
+    const socket = io(process.env.NEXT_PUBLIC_API_URL!, {
+      path: "/socket.io",
       transports: ["websocket"],
       autoConnect: true,
       reconnection: true,

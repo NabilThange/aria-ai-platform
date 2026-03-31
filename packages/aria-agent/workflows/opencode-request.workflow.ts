@@ -436,6 +436,9 @@ Improve this into a clear, actionable prompt for OpenCode. Detect what type of o
 
     // ── ADD EMAIL INSTRUCTIONS ──────────────────────────────────────────────
     // Append email sending instructions to the prompt
+    // Determine recipient email for examples
+    const exampleRecipient = emailRecipients ? emailRecipients.split(',')[0].trim() : '[RECIPIENT_EMAIL]';
+    
     const emailInstructions = `
 
 After completing the task, send an email summary using the aria-mail command.
@@ -449,15 +452,15 @@ aria-mail command syntax:
 aria-mail --to "recipient@example.com" --subject "Subject" --body "Body text" --attachment "/home/user/Desktop/filename.ext"
 
 Available parameters:
---to "email@example.com"           (REQUIRED: recipient email)
---subject "Subject text"            (REQUIRED: email subject)
---body "Body text"                  (REQUIRED: email body - can be multi-line)
---cc "cc@example.com"               (OPTIONAL: CC recipient)
---bcc "bcc@example.com"             (OPTIONAL: BCC recipient)
---sender-name "Aria Assistant"      (OPTIONAL: sender name, default: "Aria")
---button-text "View Report"         (OPTIONAL: CTA button text)
---button-url "https://example.com"  (OPTIONAL: CTA button URL)
---attachment "/path/to/file.ext"    (OPTIONAL: file to attach)
+--to "${exampleRecipient}"          (REQUIRED: recipient email)
+--subject "Subject text"             (REQUIRED: email subject)
+--body "Body text"                   (REQUIRED: email body - can be multi-line)
+--cc "${exampleRecipient}"           (OPTIONAL: CC recipient)
+--bcc "${exampleRecipient}"          (OPTIONAL: BCC recipient)
+--sender-name "Aria Assistant"       (OPTIONAL: sender name, default: "Aria")
+--button-text "View Report"          (OPTIONAL: CTA button text)
+--button-url "https://example.com"   (OPTIONAL: CTA button URL)
+--attachment "/path/to/file.ext"     (OPTIONAL: file to attach)
 
 Supported attachment types: .txt, .pdf, .png, .jpg, .jpeg, .csv, .zip, .pptx, .docx, .xlsx, .html, .css, .js
 
@@ -467,8 +470,8 @@ ${emailRecipients}
 
 IMPORTANT: Send separate emails to EACH recipient listed above. Use one aria-mail command per recipient.
 ` : `
-EXAMPLE RECIPIENT (replace with actual email if provided):
-user@example.com
+IMPORTANT: No recipient email was provided. You MUST use the actual recipient email address when sending.
+Replace [RECIPIENT_EMAIL] with the actual email address.
 `}
 
 ${researchFilePath ? `
@@ -484,14 +487,14 @@ SENDING MULTIPLE FILES:
 - To send to multiple people, run one aria-mail command per recipient
 
 Example for PowerPoint with research file:
-aria-mail --to "user@example.com" --subject "AI Trends Presentation Complete" --body "I have created the AI trends presentation with 5 slides as requested. The file is attached." --attachment "/home/user/Desktop/ai-trends.pptx" --sender-name "Aria Assistant"
-aria-mail --to "user@example.com" --subject "AI Trends Research Summary" --body "Here is the research summary used to create the presentation." --attachment "${researchFilePath || '/home/user/Desktop/research-summary.txt'}" --sender-name "Aria Assistant"
+aria-mail --to "${exampleRecipient}" --subject "AI Trends Presentation Complete" --body "I have created the AI trends presentation with 5 slides as requested. The file is attached." --attachment "/home/user/Desktop/ai-trends.pptx" --sender-name "Aria Assistant"
+aria-mail --to "${exampleRecipient}" --subject "AI Trends Research Summary" --body "Here is the research summary used to create the presentation." --attachment "${researchFilePath || '/home/user/Desktop/research-summary.txt'}" --sender-name "Aria Assistant"
 
 Example for PDF:
-aria-mail --to "manager@company.com" --subject "Sales Report Generated" --body "The Q4 sales report has been generated with charts and analysis. Please find the PDF attached." --attachment "/home/user/Desktop/sales-report.pdf"
+aria-mail --to "${exampleRecipient}" --subject "Sales Report Generated" --body "The Q4 sales report has been generated with charts and analysis. Please find the PDF attached." --attachment "/home/user/Desktop/sales-report.pdf"
 
 Example for Excel:
-aria-mail --to "finance@company.com" --subject "Budget Tracker Ready" --body "The 2024 budget tracker spreadsheet is complete with formulas and sample data." --attachment "/home/user/Desktop/budget-2024.xlsx"
+aria-mail --to "${exampleRecipient}" --subject "Budget Tracker Ready" --body "The 2024 budget tracker spreadsheet is complete with formulas and sample data." --attachment "/home/user/Desktop/budget-2024.xlsx"
 
 IMPORTANT:
 1. Always attach the file you created

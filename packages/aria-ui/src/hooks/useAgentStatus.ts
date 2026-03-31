@@ -16,6 +16,7 @@ export function useAgentStatus(taskId: string | null) {
     if (!taskId) return;
 
     const newSocket = io(process.env.NEXT_PUBLIC_API_URL!, {
+      path: '/socket.io',
       transports: ['websocket'],
     });
 
