@@ -1,6 +1,14 @@
 import { WorkflowMetadata, WorkflowServices, WorkflowResult } from '../src/workflows/workflow.interface';
+import { WorkflowLogger } from '../src/workflows/workflow-logger.helper';
 import * as sendEmailN8nWorkflow from './send-email-n8n.workflow';
 import * as openWhatsappWorkflow from './open-whatsapp.workflow';
+
+/**
+ * Helper to send conversational status messages to the frontend
+ */
+async function logMessage(logger: WorkflowLogger, message: string): Promise<void> {
+  await logger.think(message);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // METADATA
@@ -244,7 +252,7 @@ export async function execute(
   },
   services: WorkflowServices,
 ): Promise<WorkflowResult> {
-  const { pinchTab, desktop } = services;
+  const { pinchTab, desktop, browserLogger, taskId, messagesService } = services;
   const {
     topic,
     max_links = 3,
@@ -259,37 +267,56 @@ export async function execute(
   } = variables;
   const queryCount = Math.min(Math.max(1, max_links), 3);
 
+  // Create workflow logger for think() messages
+  const logger = new WorkflowLogger(browserLogger, taskId, 'deep-research', messagesService);
+
+  // Track browser instance for cleanup
+  let browserInstanceId: string | null = null;
+
   try {
     // ── STEP 0: Scrape Wikipedia first (if enabled) ───────────────────────────
     const scrapedPages: { url: string; content: string }[] = [];
     
     if (include_wikipedia) {
       console.log(`\n📚 Step 0: Scraping Wikipedia for foundational context…`);
+      await logMessage(logger, `📚 Starting with Wikipedia for solid background info...`);
+      await logMessage(logger, `🔍 Searching for "${topic}" on Wikipedia...`);
       
       // Launch browser for Wikipedia
       console.log(`  🌐 Launching browser…`);
+      await logMessage(logger, `🌐 Opening browser... getting ready to search`);
       const instance = await pinchTab.launchInstance(`deep-research-${Date.now()}`, 'headed');
+      browserInstanceId = instance.id; // Track for cleanup
       pinchTab.setCurrentInstance(instance.id);
       await pinchTab.wait(3000);
       
       try {
         // Navigate to Wikipedia homepage
         console.log(`  🏠 Navigating to Wikipedia homepage…`);
+        await logMessage(logger, `🏠 Heading to Wikipedia...`);
         await pinchTab.navigate('https://en.wikipedia.org');
         await pinchTab.wait(5000);
         
         // Type the search query in the search box
         console.log(`  🔍 Typing search query: "${topic}"…`);
+        await logMessage(logger, `⌨️  Typing your topic into the search box...`);
         await pinchTab.type('#searchInput', topic);
-        await pinchTab.wait(1000);
+        await pinchTab.wait(2000);
         
-        // Press Enter or click search button
-        console.log(`  ⏎ Submitting search…`);
-        await pinchTab.press('Enter');
-        await pinchTab.wait(8000); // Wait for search results/article to load
+        // Press Enter using desktop tool (more reliable than pinchTab.press)
+        console.log(`  ⏎ Submitting search (Enter key via desktop)…`);
+        await logMessage(logger, `🚀 Searching... let's see what we find`);
+        await desktop.pressKeys(['Return']);
+        await pinchTab.wait(3000);
+        
+        // Wait for page to fully load (check for article content or search results)
+        console.log(`  ⏳ Waiting for page to load…`);
+        await pinchTab.wait(8000); // Extended wait for full article load
         
         // Take snapshot to extract all text and links
         console.log(`  📸 Taking snapshot to extract content…`);
+        await logMessage(logger, `📸 Reading the Wikipedia article...`);
+        await logMessage(logger, `📖 Extracting all the good stuff...`);
         const snapshot = await pinchTab.snapshot('all');
         
         // Extract text content from snapshot
@@ -327,8 +354,10 @@ export async function execute(
         if (wikiContent.length > 100) {
           scrapedPages.push({ url: wikiUrl, content: wikiContent });
           console.log(`  ✅ Wikipedia scraped: ${wikiContent.length} chars from ${wikiUrl}`);
+          await logMessage(logger, `✅ Got it! Wikipedia gave us great context`);
         } else {
           console.log(`  ⚠️  Wikipedia content too short, trying fallback with getPageText…`);
+          await logMessage(logger, `🤔 Hmm, trying a different approach...`);
           
           // Fallback: use getPageText if snapshot didn't capture enough
           const fallbackText = await pinchTab.getPageText();
@@ -337,20 +366,26 @@ export async function execute(
           if (fallbackContent.length > 100) {
             scrapedPages.push({ url: wikiUrl, content: fallbackContent });
             console.log(`  ✅ Wikipedia scraped (fallback): ${fallbackContent.length} chars`);
+            await logMessage(logger, `✅ There we go! Got the Wikipedia content`);
           } else {
             console.log(`  ⚠️  Wikipedia page too short or not found, skipping`);
+            await logMessage(logger, `⚠️  Wikipedia didn't have much, moving on...`);
           }
         }
       } catch (error: any) {
         console.log(`  ⚠️  Failed to scrape Wikipedia: ${error.message}`);
+        await logMessage(logger, `⚠️  Wikipedia didn't work out, no worries though`);
         // Continue anyway - Wikipedia is optional
       }
       
       console.log(`✅ Step 0 done. Wikipedia ${scrapedPages.length > 0 ? 'added' : 'skipped'}.`);
+      await logMessage(logger, `✅ Wikipedia phase complete!`);
     }
 
     // ── STEP 1: AI generates diverse search queries ───────────────────────────
     console.log(`\n🧠 Step 1: Generating ${queryCount} targeted search queries for "${topic}"…`);
+    await logMessage(logger, `🧠 Now let me think of the best search queries...`);
+    await logMessage(logger, `💭 Crafting ${queryCount} smart searches to find great sources...`);
 
     const queryRaw = await callGroq(
       `You are someone who is really curious about a topic and knows how to search the web well.
@@ -383,31 +418,42 @@ Format: {"queries": ["query 1", "query 2", "query 3"]}`,
       ].slice(0, queryCount);
     }
     console.log(`  ✅ Queries: ${searchQueries.map((q, i) => `\n    ${i + 1}. ${q}`).join('')}`);
+    await logMessage(logger, `✅ Perfect! Got ${queryCount} great search queries`);
+    await logMessage(logger, `🎯 These should find some really good sources...`);
 
     // ── STEP 2: Launch browser (if not already launched in Step 0) ────────────
     if (!include_wikipedia || scrapedPages.length === 0) {
       console.log(`\n🌐 Step 2: Launching browser…`);
+      await logMessage(logger, `🌐 Opening browser for web searches...`);
       const instance = await pinchTab.launchInstance(`deep-research-${Date.now()}`, 'headed');
+      browserInstanceId = instance.id; // Track for cleanup
       pinchTab.setCurrentInstance(instance.id);
       await pinchTab.wait(3000);
     } else {
       console.log(`\n🌐 Step 2: Browser already launched (reusing from Step 0)…`);
+      await logMessage(logger, `🌐 Browser's already open, let's keep going...`);
     }
 
     // ── STEP 3: For each query → search → AI picks best 1 content URL ────────
     console.log(`\n🔍 Step 3: Running ${queryCount} searches and picking best content URL per query…`);
+    await logMessage(logger, `🔍 Time to search the web! Running ${queryCount} searches...`);
+    await logMessage(logger, `🎯 I'll pick only the best, most informative sources...`);
     const chosenUrls: string[] = [];
     const usedDomains = new Set<string>();
 
     for (let qi = 0; qi < searchQueries.length; qi++) {
       const query = searchQueries[qi];
       console.log(`\n  [Query ${qi + 1}/${searchQueries.length}]: "${query}"`);
+      await logMessage(logger, `🔎 Search ${qi + 1}/${searchQueries.length}: "${query}"`);
 
       const candidates = await searchQuery(query, pinchTab);
       if (candidates.length === 0) {
         console.log(`  ⚠️  No candidates found for this query, skipping.`);
+        await logMessage(logger, `⚠️  Hmm, didn't find much for that one...`);
         continue;
       }
+
+      await logMessage(logger, `📊 Found ${candidates.length} potential sources, analyzing...`);
 
       // Pre-filter: remove obvious junk and already-used domains
       const filtered = candidates.filter(c => {
@@ -471,16 +517,20 @@ Return ONLY valid JSON: {"url": "https://..."} or {"url": null} if nothing is us
             usedDomains.add(host);
             chosenUrls.push(picked);
             console.log(`  ✅ Picked: ${picked}`);
+            await logMessage(logger, `✅ Great! Found a solid source`);
           } else {
             console.log(`  ⚠️  Domain already used (${host}), skipping.`);
+            await logMessage(logger, `⚠️  Already have that site, looking for variety...`);
           }
         } catch {
           chosenUrls.push(picked);
           console.log(`  ✅ Picked: ${picked}`);
+          await logMessage(logger, `✅ Got a good one!`);
         }
       } else if (picked) {
         // AI picked something but isGoodContentUrl rejected it — trust AI anyway
         console.log(`  ⚠️  AI picked URL didn't pass filter, using it anyway: ${picked}`);
+        await logMessage(logger, `🤔 This one's borderline, but let's include it...`);
         try {
           const host = new URL(picked).hostname.replace(/^www\./, '');
           if (!usedDomains.has(host)) {
@@ -492,6 +542,7 @@ Return ONLY valid JSON: {"url": "https://..."} or {"url": null} if nothing is us
         }
       } else {
         console.log(`  ⚠️  AI returned null, falling back to first filtered candidate.`);
+        await logMessage(logger, `🤷 Using backup option...`);
         const fallback = filtered[0];
         if (fallback) {
           try {
@@ -509,6 +560,7 @@ Return ONLY valid JSON: {"url": "https://..."} or {"url": null} if nothing is us
     }
 
     if (chosenUrls.length === 0) {
+      await logMessage(logger, `❌ Uh oh, couldn't find any good sources...`);
       return {
         success: false,
         error: 'No usable URLs found after all searches.',
@@ -518,14 +570,19 @@ Return ONLY valid JSON: {"url": "https://..."} or {"url": null} if nothing is us
 
     console.log(`\n✅ Step 3 done. Selected ${chosenUrls.length} URLs:`);
     chosenUrls.forEach((u, i) => console.log(`  ${i + 1}. ${u}`));
+    await logMessage(logger, `✅ Perfect! Found ${chosenUrls.length} excellent sources`);
+    await logMessage(logger, `📚 Now let's read through all of them...`);
 
     // ── STEP 4: Scrape each chosen URL (append to existing scrapedPages from Step 0) ────
     console.log(`\n📄 Step 4: Scraping ${chosenUrls.length} pages…`);
+    await logMessage(logger, `📄 Reading ${chosenUrls.length} articles in detail...`);
+    await logMessage(logger, `⏳ This will take a minute, extracting all the content...`);
     // Note: scrapedPages already declared in Step 0, just append to it
 
     for (let i = 0; i < chosenUrls.length; i++) {
       const url = chosenUrls[i];
       console.log(`  (${i + 1}/${chosenUrls.length}): ${url}`);
+      await logMessage(logger, `📖 Reading article ${i + 1}/${chosenUrls.length}...`);
       try {
         await pinchTab.navigate(url);
         await pinchTab.wait(8000);
@@ -534,15 +591,21 @@ Return ONLY valid JSON: {"url": "https://..."} or {"url": null} if nothing is us
         const content = toSafeAscii(raw).slice(0, 6000);
         scrapedPages.push({ url, content });
         console.log(`    ✅ Scraped ${content.length} chars`);
+        await logMessage(logger, `✅ Got ${content.length} characters of content`);
       } catch (err: any) {
         console.log(`    ⚠️  Failed to scrape: ${err.message}`);
+        await logMessage(logger, `⚠️  Couldn't read that one, moving on...`);
         scrapedPages.push({ url, content: '[Page could not be loaded]' });
       }
     }
     console.log(`✅ Step 4 done.`);
+    await logMessage(logger, `✅ All articles read! Got tons of information`);
 
     // ── STEP 5: AI generates research report ──────────────────────────────────
     console.log(`\n📝 Step 5: Generating research report…`);
+    await logMessage(logger, `📝 Now the fun part... writing your research report`);
+    await logMessage(logger, `🧠 Analyzing all the sources and synthesizing insights...`);
+    await logMessage(logger, `✍️  Crafting a comprehensive report...`);
 
     const today = new Date().toISOString().split('T')[0];
 
@@ -611,15 +674,18 @@ Report generated by Aria Deep Research`,
     const cleanReport = toSafeAscii(reportRaw);
 
     console.log(`✅ Step 5 done. Report: ${cleanReport.length} chars.`);
+    await logMessage(logger, `✅ Report complete! ${cleanReport.length} characters of pure insight`);
 
     // ── STEP 6: Save report using UI (create empty file, open, paste, save) ──
     console.log(`\n💾 Step 6: Saving report via text editor…`);
+    await logMessage(logger, `💾 Saving your report to Desktop...`);
     const safeTopicName = topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30).replace(/-$/, '');
     const filename = `research-${safeTopicName}.txt`;
     const filePath = `/home/user/Desktop/${filename}`;
 
     // Write file directly with base64 encoding (ariad expects base64)
     console.log(`💾 Writing report to file: ${filename}`);
+    await logMessage(logger, `📁 Creating file: ${filename}...`);
     const base64Content = Buffer.from(cleanReport, 'utf-8').toString('base64');
     const writeResult = await desktop.writeFile(filePath, base64Content);
     
@@ -628,6 +694,8 @@ Report generated by Aria Deep Research`,
     }
     
     console.log(`✅ Step 6 done. Saved: ${filePath} (${cleanReport.length} chars)`);
+    await logMessage(logger, `✅ Perfect! Report saved to your Desktop`);
+    await logMessage(logger, `📄 File: ${filename}`);
 
     // ── STEP 7 (optional): Email ──────────────────────────────────────────────
     if (email_to) {
@@ -686,5 +754,17 @@ Report generated by Aria Deep Research`,
   } catch (error: any) {
     console.error(`\n❌ deep-research failed: ${error.message}`);
     return { success: false, error: error.message, message: `Deep research failed: ${error.message}` };
+  } finally {
+    // ── CLEANUP: Always stop browser instance ────────────────────────────────
+    if (browserInstanceId) {
+      try {
+        console.log(`\n🧹 Cleanup: Stopping browser instance ${browserInstanceId}…`);
+        await pinchTab.stopInstance(browserInstanceId);
+        console.log(`✅ Browser instance stopped successfully`);
+      } catch (cleanupError: any) {
+        console.error(`⚠️  Failed to stop browser instance: ${cleanupError.message}`);
+        // Don't throw - cleanup errors shouldn't fail the workflow
+      }
+    }
   }
 }

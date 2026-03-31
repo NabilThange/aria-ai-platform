@@ -45,17 +45,32 @@ export class ClarifierAgent extends BaseAgent {
 
       // Build prompt with full history
       const prompt = this.buildClarificationPrompt(userInput, history);
+      const systemPrompt = this.getSystemPrompt();
+
+      // LOG EXACT INPUT TO GROQ
+      this.logger.log(`\n${'='.repeat(80)}`);
+      this.logger.log(`[CLARIFIER → GROQ INPUT]`);
+      this.logger.log(`${'='.repeat(80)}`);
+      this.logger.log(`System Prompt Length: ${systemPrompt.length} chars (~${Math.ceil(systemPrompt.length / 4)} tokens)`);
+      this.logger.log(`User Prompt Length: ${prompt.length} chars (~${Math.ceil(prompt.length / 4)} tokens)`);
+      this.logger.log(`Model: ${this.model.model}`);
+      this.logger.log(`Use Tools: false`);
+      this.logger.log(`\nSystem Prompt Preview (first 300 chars):`);
+      this.logger.log(systemPrompt.substring(0, 300));
+      this.logger.log(`\nUser Prompt:`);
+      this.logger.log(prompt);
+      this.logger.log(`${'='.repeat(80)}\n`);
 
       // LOG AGENT START TO BROWSER
       this.browserLogger.logAgentStart(taskId, 'CLARIFIER_AGENT', {
-        systemPrompt: this.getSystemPrompt(),
+        systemPrompt: systemPrompt,
         userPrompt: prompt,
         context: { userInput: userInput.substring(0, 200), historyTurns: history.length },
       });
 
       // Call Groq for clarification
       const response = await this.groqService.generateMessage(
-        this.getSystemPrompt(),
+        systemPrompt,
         [
           {
             role: 'USER',

@@ -29,7 +29,14 @@ async function testWorkflows() {
   const tasksGateway = {} as TasksGateway; // Mock gateway
   const messagesService = new MessagesService(prismaService, tasksGateway);
   
-  const workflowService = new WorkflowService(pinchTabService, desktopService, browserLogger, messagesService);
+  // Create WorkflowService with EventEmitter2
+  const workflowService = new WorkflowService(
+    pinchTabService, 
+    desktopService, 
+    browserLogger, 
+    messagesService,
+    eventEmitter // Added for webhook completion support
+  );
   
   try {
     // Test 1: List workflows

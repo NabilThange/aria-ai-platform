@@ -3,6 +3,7 @@ import { PinchTabService } from './pinchtab.service';
 import { DesktopService } from './desktop.service';
 import { BrowserLoggerService } from '../logger/browser-logger.service';
 import { MessagesService } from '../messages/messages.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WorkflowLoader } from '../workflows/workflow.loader';
 import {
   WorkflowMetadata,
@@ -27,6 +28,7 @@ export class WorkflowService {
     private readonly desktopService: DesktopService,
     private readonly browserLogger: BrowserLoggerService,
     private readonly messagesService: MessagesService,
+    private readonly eventEmitter: EventEmitter2,
   ) {
     this.workflowLoader = new WorkflowLoader();
     // When running from dist/services/workflow.service.js:
@@ -139,6 +141,7 @@ export class WorkflowService {
         browserLogger: this.browserLogger,
         messagesService: this.messagesService,
         taskId: taskId,
+        eventEmitter: this.eventEmitter,
       };
       
       // Execute workflow with timeout

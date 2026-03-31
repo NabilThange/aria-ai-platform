@@ -10,10 +10,11 @@ export class BrowserLoggerService {
   constructor(private readonly eventEmitter: EventEmitter2) {}
 
   /**
-   * Log agent execution start with full input details
+   * Log agent execution start with input details
+   * System prompts are excluded to reduce token usage and WebSocket traffic
    */
   logAgentStart(taskId: string, agentName: string, input: {
-    systemPrompt: string;
+    systemPrompt?: string;  // Optional, not logged
     userPrompt: string;
     context?: any;
   }) {
@@ -23,7 +24,8 @@ export class BrowserLoggerService {
       timestamp: new Date().toISOString(),
       data: {
         agentName,
-        systemPrompt: input.systemPrompt,
+        // systemPrompt excluded - reduces token usage and WebSocket payload
+        systemPromptLength: input.systemPrompt?.length || 0,  // Track size only
         userPrompt: input.userPrompt,
         context: input.context,
       },

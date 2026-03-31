@@ -3,7 +3,7 @@
 # Send email via N8N webhook
 # This script is pre-installed in the ARIA desktop environment
 # Usage: aria-mail --to "email@example.com" --subject "Subject" --body "Body text"
-# With attachment: aria-mail --to "email@example.com" --subject "Subject" --body "Body" --attachment "/path/to/file.txt"
+# With attachment: aria-mail --to "email@example.com" --subject "Subject" --body "Body" --attachment "/path/to/file.pptx"
 
 # N8N webhook URL (hidden from user)
 WEBHOOK_URL="https://n8n-render-tpfk.onrender.com/webhook/send-email-api"
@@ -84,16 +84,24 @@ if [ -n "$ATTACHMENT_PATH" ]; then
   # Get filename
   FILENAME=$(basename "$ATTACHMENT_PATH")
 
-  # Get mime type based on extension
+  # Get mime type based on extension (lowercased for safety)
   EXT="${FILENAME##*.}"
-  case "$EXT" in
-    txt)  MIME_TYPE="text/plain" ;;
-    pdf)  MIME_TYPE="application/pdf" ;;
-    png)  MIME_TYPE="image/png" ;;
-    jpg|jpeg) MIME_TYPE="image/jpeg" ;;
-    csv)  MIME_TYPE="text/csv" ;;
-    zip)  MIME_TYPE="application/zip" ;;
-    *)    MIME_TYPE="application/octet-stream" ;;
+  EXT_LOWER=$(echo "$EXT" | tr '[:upper:]' '[:lower:]')
+  case "$EXT_LOWER" in
+    txt)         MIME_TYPE="text/plain" ;;
+    pdf)         MIME_TYPE="application/pdf" ;;
+    png)         MIME_TYPE="image/png" ;;
+    jpg|jpeg)    MIME_TYPE="image/jpeg" ;;
+    gif)         MIME_TYPE="image/gif" ;;
+    csv)         MIME_TYPE="text/csv" ;;
+    zip)         MIME_TYPE="application/zip" ;;
+    pptx)        MIME_TYPE="application/vnd.openxmlformats-officedocument.presentationml.presentation" ;;
+    ppt)         MIME_TYPE="application/vnd.ms-powerpoint" ;;
+    docx)        MIME_TYPE="application/vnd.openxmlformats-officedocument.wordprocessingml.document" ;;
+    doc)         MIME_TYPE="application/msword" ;;
+    xlsx)        MIME_TYPE="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ;;
+    xls)         MIME_TYPE="application/vnd.ms-excel" ;;
+    *)           MIME_TYPE="application/octet-stream" ;;
   esac
 
   # Convert file to base64

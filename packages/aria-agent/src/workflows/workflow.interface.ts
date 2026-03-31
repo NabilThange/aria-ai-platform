@@ -2,6 +2,7 @@ import { PinchTabService } from '../services/pinchtab.service';
 import { DesktopService } from '../services/desktop.service';
 import { BrowserLoggerService } from '../logger/browser-logger.service';
 import { MessagesService } from '../messages/messages.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 /**
  * Workflow metadata - exported from each .workflow.ts file
@@ -34,6 +35,7 @@ export interface WorkflowServices {
   browserLogger: BrowserLoggerService;
   messagesService: MessagesService; // For creating thinking messages
   taskId: string; // Add taskId for logging context
+  eventEmitter: EventEmitter2; // For webhook-based completion detection
 }
 
 /**

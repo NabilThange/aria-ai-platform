@@ -80,7 +80,8 @@ export class GroqService implements BytebotAgentService {
         const groqMessages = this.formatMessagesForGroq(messages);
 
         // Use custom tools if provided, otherwise use default groqTools
-        const tools = customTools || groqTools;
+        // CRITICAL: Only load tools if useTools is true
+        const tools = useTools ? (customTools || groqTools) : [];
 
         // ===== TOKEN COUNTING & TPM LIMIT TRACKING =====
         const estimatedTokens = this.estimateTokenCount(systemPrompt, groqMessages, tools);
@@ -101,13 +102,43 @@ export class GroqService implements BytebotAgentService {
           this.logger.debug(`${model}: ${estimatedTokens} tokens (context: ${contextUsagePercent.toFixed(1)}%, TPM: ${tpmUsagePercent.toFixed(1)}%)`);
         }
         
-        // Detailed breakdown only at DEBUG level
-        this.logger.debug(`Token breakdown: system=${this.estimateTextTokens(systemPrompt)}, messages=${this.estimateMessagesTokens(groqMessages)}, tools=${this.estimateToolsTokens(tools)}`);
+        // Detailed breakdown - ALWAYS log for debugging TPM issues
+        this.logger.log(`\n${'='.repeat(80)}`);
+        this.logger.log(`[GROQ API CALL DEBUG]`);
+        this.logger.log(`${'='.repeat(80)}`);
+        this.logger.log(`Model: ${model}`);
+        this.logger.log(`Use Tools: ${useTools}`);
+        this.logger.log(`Tools Count: ${tools.length}`);
+        this.logger.log(`\n📊 TOKEN BREAKDOWN:`);
+        this.logger.log(`   System Prompt: ${this.estimateTextTokens(systemPrompt)} tokens (${systemPrompt.length} chars)`);
+        this.logger.log(`   Messages: ${this.estimateMessagesTokens(groqMessages)} tokens`);
+        this.logger.log(`   Tools: ${this.estimateToolsTokens(tools)} tokens`);
+        this.logger.log(`   TOTAL ESTIMATED: ${estimatedTokens} tokens`);
+        this.logger.log(`\n📝 SYSTEM PROMPT (first 500 chars):`);
+        this.logger.log(systemPrompt.substring(0, 500));
+        this.logger.log(`\n📝 SYSTEM PROMPT (last 500 chars):`);
+        this.logger.log(systemPrompt.substring(Math.max(0, systemPrompt.length - 500)));
+        this.logger.log(`\n📨 USER MESSAGES (${groqMessages.length} total):`);
+        groqMessages.forEach((msg, idx) => {
+          const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+          this.logger.log(`   Message ${idx + 1} (${msg.role}): ${content.substring(0, 200)}${content.length > 200 ? '...' : ''}`);
+        });
+        if (useTools && tools.length > 0) {
+          this.logger.log(`\n🔧 TOOLS (${tools.length} total):`);
+          tools.forEach((tool: any, idx) => {
+            this.logger.log(`   ${idx + 1}. ${tool.function.name}`);
+          });
+        }
+        this.logger.log(`${'='.repeat(80)}\n`);
         // ===== END TOKEN COUNTING =====
 
         // DEBUG: Log final message structure
         this.logger.debug(`📤 Sending ${groqMessages.length} messages to Groq (model: ${model})`);
-        this.logger.debug(`   Using ${tools.length} tools: ${tools.map((t: any) => t.function.name).join(', ')}`);
+        if (useTools) {
+          this.logger.debug(`   Using ${tools.length} tools: ${tools.map((t: any) => t.function.name).join(', ')}`);
+        } else {
+          this.logger.debug(`   No tools (useTools=false)`);
+        }
         groqMessages.forEach((msg, idx) => {
           const isArray = Array.isArray(msg.content);
           const hasImage = isArray && msg.content.some((c: any) => c.type === 'image_url');
@@ -369,7 +400,7 @@ export class GroqService implements BytebotAgentService {
       
       // OpenAI-compatible models on Groq
       'openai/gpt-oss-120b': { contextWindow: 32768, tpmLimit: 8000, rpmLimit: 30 },
-      'openai/gpt-oss-20b': { contextWindow: 32768, tpmLimit: 15000, rpmLimit: 30 },
+      'openai/gpt-oss-20b': { contextWindow: 32768, tpmLimit: 8000, rpmLimit: 30 },  // Updated: Groq lowered from 15000 to 8000
       
       // Mixtral models
       'mistralai/mixtral-8x7b-32768': { contextWindow: 32768, tpmLimit: 15000, rpmLimit: 30 },

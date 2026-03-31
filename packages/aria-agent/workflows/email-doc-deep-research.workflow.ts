@@ -22,11 +22,11 @@ export async function execute(variables: any, services: WorkflowServices): Promi
   const logger = new WorkflowLogger(browserLogger, taskId, 'email-doc-deep-research', messagesService);
   
   const workflowStartTime = Date.now();
-  let tempFilePath: string | null = null;
   
   try {
     
     await logger.think(`Alright, let's tackle this research project about "${topic}"! I'll gather information from multiple sources and create a comprehensive ${documentType.toUpperCase()} document for you.`);
+    await logger.think(`🎯 This is going to be thorough - web research, ${includeYouTube ? 'YouTube videos, ' : ''}and a professional document at the end!`);
     
     // ========================================
     // PHASE 1: Deep Web Research
@@ -34,7 +34,9 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     console.log('📚 Phase 1: Deep web research...');
     checkRemainingTime(workflowStartTime, metadata.timeout_ms, 'web research');
     
+    await logger.think(`📚 Phase 1: Deep Web Research`);
     await logger.think(`First, I'll dive into web research. Let me search for the most relevant and up-to-date information about ${topic}...`);
+    await logger.think(`🔍 Searching ${maxLinks} quality sources across the web...`);
     
     // Import and execute deep-research workflow
     const deepResearchWorkflow = await import('./deep-research.workflow');
@@ -50,7 +52,9 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     if (!webResult.success) throw new Error(`Web research failed: ${webResult.error}`);
     console.log(`✅ Web research completed: ${webResult.data.filePath}`);
     
+    await logger.think(`✅ Phase 1 complete! Web research is done`);
     await logger.think(`Great! I've gathered some solid web research. Found ${maxLinks} quality sources with detailed information.`);
+    await logger.think(`📊 Got ${webResult.data.reportLength || 'tons of'} characters of research data!`);
     
     // ========================================
     // PHASE 2: YouTube Research
@@ -60,7 +64,9 @@ export async function execute(variables: any, services: WorkflowServices): Promi
       console.log('🎥 Phase 2: YouTube research...');
       checkRemainingTime(workflowStartTime, metadata.timeout_ms, 'YouTube research');
       
+      await logger.think(`🎥 Phase 2: YouTube Research`);
       await logger.think(`Now let me check YouTube for video content. Visual explanations can add great depth to the research...`);
+      await logger.think(`🎬 Searching for the top ${maxVideos} most relevant videos...`);
       
       // Import and execute youtube-demo workflow
       const youtubeWorkflow = await import('./youtube-demo.workflow');
@@ -70,15 +76,19 @@ export async function execute(variables: any, services: WorkflowServices): Promi
       
       if (youtubeResult.success) {
         console.log(`✅ YouTube research completed: ${youtubeResult.data?.videoCount ?? 0} videos`);
+        await logger.think(`✅ Phase 2 complete! YouTube research is done`);
         await logger.think(`Perfect! Found ${youtubeResult.data?.videoCount ?? 0} relevant videos. This will add some great multimedia perspective.`);
+        await logger.think(`🎯 Got video summaries, transcripts, and key insights!`);
       } else {
         console.warn(`⚠️ YouTube research failed, continuing without it: ${youtubeResult.error}`);
-        await logger.think(`Hmm, couldn't get YouTube data this time, but no worries - the web research is solid enough to proceed.`);
+        await logger.think(`⚠️ Hmm, couldn't get YouTube data this time...`);
+        await logger.think(`No worries though - the web research is solid enough to proceed!`);
       }
       
       // Close all PinchTab browser instances to avoid focus conflicts
       console.log('🧹 Closing all PinchTab browser instances...');
-      await logger.think(`Let me clean up the browser instances before moving to document generation...`);
+      await logger.think(`🧹 Cleaning up browser instances...`);
+      await logger.think(`🔄 Getting ready for document generation phase...`);
       
       try {
         const { pinchTab } = services;
@@ -96,8 +106,10 @@ export async function execute(variables: any, services: WorkflowServices): Promi
         
         await desktop.wait(2000); // Wait for browsers to fully close
         console.log('✅ All browser instances closed');
+        await logger.think(`✅ All clean! Browsers closed successfully`);
       } catch (err: any) {
         console.warn(`⚠️ Error closing browsers: ${err.message}`);
+        await logger.think(`⚠️ Had a small hiccup closing browsers, but moving on...`);
       }
     }
     
@@ -107,13 +119,22 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     console.log('📝 Phase 3: Combining and summarizing research...');
     checkRemainingTime(workflowStartTime, metadata.timeout_ms, 'summarization');
     
+    await logger.think(`📝 Phase 3: Combining & Analyzing`);
     await logger.think(`Now I'll combine all the research and distill it into the key insights. This is where the magic happens...`);
+    await logger.think(`🧠 Reading through all the data I collected...`);
     
     // Read web research file
     const webContent = await desktop.readFile(webResult.data.filePath);
     const webText = Buffer.from(webContent.content || '', 'base64').toString('utf-8');
     
-    // Combine with YouTube data (safe access)
+    // Validate that we have research content
+    if (!webText || webText.length < 100) {
+      throw new Error('Web research file is empty or too short. Cannot proceed with document generation.');
+    }
+    
+    console.log(`✅ Web research file validated: ${webText.length} chars from ${webResult.data.filePath}`);
+    
+    // Combine with YouTube data for summarization
     let combinedText = `RESEARCH REPORT: ${topic}\n\n=== WEB RESEARCH ===\n${webText}\n\n`;
     
     if (youtubeResult?.success && youtubeResult.data?.videos) {
@@ -125,21 +146,21 @@ export async function execute(variables: any, services: WorkflowServices): Promi
       });
     }
     
-    // Save combined research to temp file
-    const uuid = Date.now().toString(36);
-    tempFilePath = `/tmp/combined-research-${uuid}.txt`;
-    const combinedBase64 = Buffer.from(combinedText, 'utf-8').toString('base64');
-    await desktop.writeFile(tempFilePath, combinedBase64);
-    console.log(`✅ Combined research saved to temp: ${tempFilePath}`);
+    console.log(`✅ Combined research text: ${combinedText.length} chars (web + YouTube)`);
+    
+    await logger.think(`💾 Research data ready for document generation...`);
     
     // Summarize with Groq AI
     console.log('🤖 Summarizing research with AI...');
-    await logger.think(`Let me analyze all this information and extract the most important points...`);
+    await logger.think(`🤖 Firing up the AI to analyze everything...`);
+    await logger.think(`Let me extract the most important points from all this data...`);
     
     const summarizedResearch = await summarizeResearch(combinedText);
     console.log(`✅ Research summarized: ${summarizedResearch.length} chars`);
     
-    await logger.think(`Excellent! I've identified the key findings. Now let's create a professional document with this information.`);
+    await logger.think(`✅ Phase 3 complete! Research analyzed and summarized`);
+    await logger.think(`Excellent! I've identified the key findings. Got ${summarizedResearch.length} characters of distilled insights.`);
+    await logger.think(`🎯 Now let's create a professional document with this information!`);
     
     // ========================================
     // PHASE 4: Generate Document
@@ -147,20 +168,27 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     console.log('📄 Phase 4: Generating document with OpenCode...');
     checkRemainingTime(workflowStartTime, metadata.timeout_ms, 'document generation');
     
+    await logger.think(`📄 Phase 4: Document Generation`);
     await logger.think(`Time to create the ${documentType.toUpperCase()} document. I'll use OpenCode to generate a professional, well-structured document with all the research findings...`);
+    await logger.think(`✨ This is the exciting part - bringing it all together!`);
     
     const documentPrompt = buildOpenCodePrompt(topic, documentType, summarizedResearch);
+    
+    await logger.think(`📋 Crafting detailed instructions for OpenCode...`);
+    await logger.think(`🎨 Requesting a ${documentType === 'ppt' ? '8-10 slide presentation' : documentType === 'pdf' ? 'professional PDF report' : 'well-structured text document'}...`);
     
     // Import and execute opencode-request workflow
     const opencodeWorkflow = await import('./opencode-request.workflow');
     const docResult = await logger.logToolCall('opencode-request', { 
       userRequest: documentPrompt,
-      researchFilePath: tempFilePath || undefined,
+      documentType: documentType, // Pass explicit document type
+      researchFilePath: webResult.data.filePath, // Use Desktop file directly, not temp file
       emailRecipients: email
     }, () =>
       opencodeWorkflow.execute({ 
         userRequest: documentPrompt,
-        researchFilePath: tempFilePath || undefined,
+        documentType: documentType, // Pass explicit document type
+        researchFilePath: webResult.data.filePath, // Use Desktop file directly, not temp file
         emailRecipients: email
       }, services)
     );
@@ -168,7 +196,10 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     if (!docResult.success) throw new Error(`Document generation failed: ${docResult.error}`);
     console.log(`✅ OpenCode completed and sent emails`);
     
-    await logger.think(`Perfect! The document is ready and I've sent it to ${email}. All done! 🎉`);
+    await logger.think(`✅ Phase 4 complete! Document generated successfully`);
+    await logger.think(`Perfect! The document is ready and I've sent it to ${email}.`);
+    await logger.think(`📧 Email sent with the ${documentType.toUpperCase()} document attached!`);
+    await logger.think(`🎉 All done! Check your inbox!`);
     
     // ========================================
     // SUCCESS - OpenCode handles everything (document creation + email sending)
@@ -178,6 +209,9 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     console.log(`📧 OpenCode sent emails to: ${email}`);
     console.log(`📄 OpenCode created document(s) and attached to emails`);
     
+    await logger.think(`⏱️  Total time: ${Math.floor(totalDuration / 1000)} seconds`);
+    await logger.think(`✨ That was a comprehensive research workflow!`);
+    
     return {
       success: true,
       message: `Research completed. OpenCode generated document(s) and sent emails to ${email}`,
@@ -185,7 +219,7 @@ export async function execute(variables: any, services: WorkflowServices): Promi
         topic,
         webResearch: webResult.data,
         youtubeResearch: youtubeResult?.data,
-        researchFilePath: tempFilePath,
+        researchFilePath: webResult.data.filePath,
         emailRecipients: email,
         duration: totalDuration
       }
@@ -193,61 +227,14 @@ export async function execute(variables: any, services: WorkflowServices): Promi
     
   } catch (error: any) {
     console.error(`❌ Workflow failed: ${error.message}`);
-    await logger.think(`Oops, ran into an issue: ${error.message}. Let me try to recover...`);
+    await logger.think(`❌ Oops, ran into an issue...`);
+    await logger.think(`Error: ${error.message}`);
+    await logger.think(`😔 Sorry about that, let me see if I can recover...`);
     return {
       success: false,
       error: error.message,
       message: `Workflow failed: ${error.message}`
     };
-  } finally {
-    // Cleanup temp file - open fresh terminal for cleanup only
-    if (tempFilePath) {
-      try {
-        console.log(`🧹 Cleaning up temp file: ${tempFilePath}`);
-        await logger.think(`Just cleaning up some temporary files...`);
-        
-        // Open a fresh terminal for cleanup
-        await logger.logToolCall('launchApplication', { application: 'terminal' }, () =>
-          desktop.launchApplication('terminal')
-        );
-        await logger.logToolCall('wait', { duration: 2000 }, () =>
-          desktop.wait(2000)
-        );
-        
-        // Click to focus
-        await logger.logToolCall('clickMouse', { x: 640, y: 400, button: 'left' }, () =>
-          desktop.clickMouse({ x: 640, y: 400 }, 'left')
-        );
-        await logger.logToolCall('wait', { duration: 500 }, () =>
-          desktop.wait(500)
-        );
-        
-        // Hit Enter for fresh prompt
-        await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
-          desktop.pressKeys(['Return'])
-        );
-        await logger.logToolCall('wait', { duration: 500 }, () =>
-          desktop.wait(500)
-        );
-        
-        // Delete temp file (use typeText instead of pasteText)
-        await logger.logToolCall('typeText', { text: `rm "${tempFilePath}"` }, () =>
-          desktop.typeText(`rm "${tempFilePath}"`, 0)
-        );
-        await logger.logToolCall('wait', { duration: 300 }, () =>
-          desktop.wait(300)
-        );
-        await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
-          desktop.pressKeys(['Return'])
-        );
-        await logger.logToolCall('wait', { duration: 500 }, () =>
-          desktop.wait(500)
-        );
-        console.log(`✅ Temp file deleted`);
-      } catch (err: any) {
-        console.warn(`⚠️ Cleanup failed: ${err.message}`);
-      }
-    }
   }
 }
 
@@ -318,87 +305,7 @@ ${docType === 'ppt' ? `
 CRITICAL: Save ONLY to this exact path: /home/user/Desktop/${filename}.${ext}`;
 }
 
-/**
- * Scan for generated file using find with -newer and fallback
- */
-async function scanForGeneratedFile(
-  desktop: any,
-  logger: WorkflowLogger,
-  docType: string,
-  tempFilePath: string
-): Promise<string> {
-  console.log('🔍 Scanning Desktop for generated file...');
-  
-  const ext = docType === 'ppt' ? 'pptx' : docType === 'pdf' ? 'pdf' : 'txt';
-  
-  // Open a fresh terminal for file scanning (opencode already closed its terminal)
-  await desktop.launchApplication('terminal');
-  await desktop.wait(2000);
-  
-  // Click to focus
-  await desktop.clickMouse({ x: 640, y: 400 }, 'left');
-  await desktop.wait(500);
-  
-  // Hit Enter to get fresh prompt
-  await desktop.pressKeys(['Return']);
-  await desktop.wait(500);
-  
-  // Try find with -newer first (use typeText instead of pasteText)
-  const findOutputPath = '/tmp/find-out.txt';
-  await desktop.typeText(`find /home/user/Desktop -name "*.${ext}" -newer "${tempFilePath}" -type f > ${findOutputPath}`, 0);
-  await desktop.wait(300);
-  await desktop.pressKeys(['Return']);
-  await desktop.wait(1000);
-  
-  const findContent = await desktop.readFile(findOutputPath);
-  let findText = Buffer.from(findContent.content || '', 'base64').toString('utf-8');
-  let lines = findText.trim().split('\n').filter(l => l.length > 0);
-  
-  // Fallback: if -newer returns nothing, try -mmin -5 (last 5 minutes)
-  if (lines.length === 0) {
-    console.log('⚠️  No files found with -newer, trying -mmin -5 fallback...');
-    
-    // Hit Enter for fresh prompt
-    await desktop.pressKeys(['Return']);
-    await desktop.wait(500);
-    
-    await desktop.typeText(`find /home/user/Desktop -name "*.${ext}" -mmin -5 -type f > ${findOutputPath}`, 0);
-    await desktop.wait(300);
-    await desktop.pressKeys(['Return']);
-    await desktop.wait(1000);
-    
-    const fallbackContent = await desktop.readFile(findOutputPath);
-    findText = Buffer.from(fallbackContent.content || '', 'base64').toString('utf-8');
-    lines = findText.trim().split('\n').filter(l => l.length > 0);
-  }
-  
-  if (lines.length === 0) {
-    throw new Error(`No .${ext} file found on Desktop (tried -newer and -mmin -5)`);
-  }
-  
-  const filePath = lines[0].trim();
-  console.log(`✅ Found file: ${filePath}`);
-  
-  return filePath;
-}
 
-/**
- * Build email body
- */
-function buildEmailBody(topic: string, webData: any, youtubeData: any): string {
-  let body = `Research Report: ${topic}\n\n`;
-  body += `This comprehensive report includes:\n`;
-  body += `- Web research from ${webData?.sources?.length ?? 0} sources\n`;
-  
-  if (youtubeData?.videoCount) {
-    body += `- YouTube research from ${youtubeData.videoCount} videos\n`;
-  }
-  
-  body += `\nThe attached document contains the full research findings and analysis.\n\n`;
-  body += `Generated by ARIA Research Assistant`;
-  
-  return body;
-}
 
 /**
  * Call Groq AI (key rotation)

@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { WorkflowsController } from './workflows.controller';
+import { WorkflowCompletionController } from './workflow-completion.controller';
 import { WorkflowService } from '../services/workflow.service';
 import { PinchTabService } from '../services/pinchtab.service';
 import { DesktopService } from '../services/desktop.service';
@@ -9,7 +10,7 @@ import { MessagesModule } from '../messages/messages.module';
 
 @Module({
   imports: [EventEmitterModule, forwardRef(() => MessagesModule)],
-  controllers: [WorkflowsController],
+  controllers: [WorkflowsController, WorkflowCompletionController],
   providers: [WorkflowService, PinchTabService, DesktopService, BrowserLoggerService],
   exports: [WorkflowService],
 })
