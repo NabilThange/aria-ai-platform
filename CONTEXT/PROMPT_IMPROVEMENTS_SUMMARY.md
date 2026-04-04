@@ -1,5 +1,85 @@
 # ARIA Prompt Improvements Summary
 
+## Changes Made (April 2, 2026)
+
+### 1. ORCHESTRATOR Agent - Mandatory Workflow Exploration
+
+**Problem:** Orchestrator had complex hardcoded workflow detection rules that were rigid and difficult to maintain. The prompt was overly prescriptive with long checklists.
+
+**Solution:**
+- Removed 200+ lines of complex workflow detection logic
+- Replaced with simple mandatory workflow exploration requirement
+- Added concise workflow overview section with clear use cases
+
+**Key Changes:**
+- **MANDATORY WORKFLOW EXPLORATION:** Must call list_workflows() and read at least 1 workflow before planning
+- **Simplified workflow descriptions:** Each workflow now has 4 clear fields:
+  - Use when: Clear trigger condition
+  - What it does: Brief flow description
+  - Variables: Required parameters
+  - Example: One concrete example
+- **Removed:** Verbose detection checklists, trigger/non-trigger examples, step-by-step analysis
+- **Added:** Clear "WHY THIS MATTERS" explanation emphasizing pre-built workflows
+
+**Workflows Documented:**
+1. email-doc-deep-research (research + document + email)
+2. perplexity-linkedin-post (research + LinkedIn post)
+3. opencode-request (document/code/website creation)
+4. deep-research (research only)
+5. send-email-n8n (email only)
+6. freelancer-research-email (local business research)
+
+**Impact:**
+- Prompt reduced from ~350 lines to ~150 lines
+- More flexible - Orchestrator explores actual workflows instead of following hardcoded rules
+- Easier to maintain - Adding new workflows doesn't require prompt updates
+- Better decision making - Orchestrator reads workflow details before choosing
+
+### 2. CLARIFIER Agent - Critical Information Detection
+
+**Problem:** CLARIFIER was assuming critical information like email addresses, leading to tasks failing later when workflows needed actual email addresses.
+
+**Solution:**
+- Added "CRITICAL INFORMATION (ALWAYS ASK IF MISSING)" section
+- Made email address requirement explicit and non-negotiable
+- Added clear examples showing wrong vs correct behavior
+
+**Key Changes:**
+- **New rule:** NEVER assume email addresses - ALWAYS ask if missing
+- **Forbidden patterns:**
+  - ❌ Placeholders like "user@example.com"
+  - ❌ Vague references like "send to user"
+  - ❌ Proceeding without actual email address
+- **Required behavior:** Ask "What email address should I send this to?"
+- **Added examples section:** Shows 4 scenarios (2 bad, 2 good)
+
+**Critical Information Categories:**
+1. **Email addresses** - For any send/email task (MANDATORY)
+2. **Recipient information** - Phone numbers, usernames, etc.
+3. **Destructive actions** - Confirm before deleting/removing
+4. **Ambiguous topics** - Clarify vague research subjects
+
+**Example Improvements:**
+
+**Before:**
+```
+User: "Research AI trends and email me a report"
+CLARIFIER: ✅ clarified_goal: "Research AI trends, create PDF report, send to user"
+```
+
+**After:**
+```
+User: "Research AI trends and email me a report"
+CLARIFIER: ❌ clarified_goal: "REQUIRES_USER_CLARIFICATION"
+           question: "What email address should I send the report to?"
+```
+
+**Impact:**
+- Prevents workflow failures due to missing email addresses
+- Reduces wasted compute on tasks that can't complete
+- Better user experience - asks upfront instead of failing later
+- Maintains smart assumptions for non-critical info (format, colors, location)
+
 ## Changes Made (March 31, 2026)
 
 ### 1. CLARIFIER Agent - Reduced Verbosity

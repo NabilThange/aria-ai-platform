@@ -10,9 +10,13 @@ export function createPlanApprovalState() {
     isAwaitingPlanApproval = val;
   };
 
-  // Mock the task status effect
+  // Mock the task/shared-state effect
   const handleTaskStatusEffect = (taskStatus: string) => {
-    if (taskStatus === 'needs_help') {
+    if (
+      taskStatus === 'needs_help' ||
+      taskStatus === 'running' ||
+      isAwaitingPlanApproval
+    ) {
       // In real code this fetches from backend and sets it
       // Let's assume backend returns true
       setIsAwaitingPlanApproval(true);
@@ -22,13 +26,9 @@ export function createPlanApprovalState() {
   };
 
   // Mock the agent status effect
-  let doCancel = true; // Simulating the current bad code
   const handleAgentStatusEffect = (agentStatus: { status: string } | null) => {
     if (agentStatus?.status === 'awaiting_plan_approval') {
       setIsAwaitingPlanApproval(true);
-    } else if (agentStatus?.status && agentStatus.status !== 'awaiting_plan_approval') {
-      // THE BUG IN PRODUCTION CODE:
-      if (doCancel) setIsAwaitingPlanApproval(false);
     }
   };
 
@@ -36,7 +36,6 @@ export function createPlanApprovalState() {
     get isAwaitingPlanApproval() { return isAwaitingPlanApproval; },
     handleTaskStatusEffect,
     handleAgentStatusEffect,
-    fix: () => { doCancel = false; }
   };
 }
 
@@ -51,6 +50,20 @@ test('isAwaitingPlanApproval stays true when agent status goes idle during needs
   state.handleAgentStatusEffect({ status: 'idle' });
   
   // Expected behavior: it should STILL be true because taskStatus is still needs_help
-  // Current behavior: it becomes false!
-  assert.strictEqual(state.isAwaitingPlanApproval, true, "BUG: isAwaitingPlanApproval became false when agent went idle!");
+  assert.strictEqual(state.isAwaitingPlanApproval, true, "Approval state should survive idle websocket updates.");
+});
+
+test('isAwaitingPlanApproval stays true when task briefly reports running during approval handoff', () => {
+  const state = createPlanApprovalState();
+
+  state.handleTaskStatusEffect('needs_help');
+  assert.strictEqual(state.isAwaitingPlanApproval, true);
+
+  state.handleTaskStatusEffect('running');
+
+  assert.strictEqual(
+    state.isAwaitingPlanApproval,
+    true,
+    "Approval state should survive a temporary running status while shared state still awaits approval.",
+  );
 });

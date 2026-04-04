@@ -7,12 +7,12 @@
 export const AGENT_MODELS = {
   CLARIFIER: {
     provider: 'groq',
-    model: 'openai/gpt-oss-20b',
+    model: 'llama-3.3-70b-versatile',
     description: 'Fast Q&A, user is waiting',
   },
   ORCHESTRATOR: {
-    provider: 'bytez',
-    model: 'anthropic/claude-opus-4-6',
+    provider: 'openrouter',
+    model: 'openai/gpt-oss-120b:free',
     description: 'Brain of system - bad plan = everything fails',
   },
   WEB: {
@@ -33,7 +33,7 @@ export const AGENT_MODELS = {
   },
   VERIFIER: {
     provider: 'groq',
-    model: 'openai/gpt-oss-20b',
+    model: 'llama-3.3-70b-versatile',
     description: 'Runs 20-30x per task, strict JSON guaranteed',
     strictJson: true,
   },
@@ -44,12 +44,12 @@ export const AGENT_MODELS = {
   },
   REPORTER: {
     provider: 'groq',
-    model: 'openai/gpt-oss-20b',
+    model: 'llama-3.3-70b-versatile',
     description: 'Reads state, writes summary - zero reasoning',
   },
   WORKFLOW: {
     provider: 'groq',
-    model: 'openai/gpt-oss-20b',
+    model: 'llama-3.3-70b-versatile',
     description: 'Executes pre-built workflows, fast execution',
   },
 } as const;

@@ -49,6 +49,11 @@ export class BytezService implements BytebotAgentService {
     useTools: boolean = true,
     signal?: AbortSignal,
     customTools?: any[], // Allow passing custom tools
+    options?: {
+      isFirstMessage?: boolean;      // NEW: Only send system prompt on first message
+      conversationId?: string;       // NEW: Track conversation context
+      skipSystemPrompt?: boolean;    // NEW: Explicitly skip system prompt
+    },
   ): Promise<BytebotAgentResponse> {
     if (this.mockLlmService.isMockTask(messages)) {
       return this.mockLlmService.handleMockTask(systemPrompt, messages, model);
@@ -69,7 +74,19 @@ export class BytezService implements BytebotAgentService {
       }
 
       try {
-        const bytezMessages = this.formatMessagesForBytez(messages, systemPrompt);
+        // ===== SYSTEM PROMPT OPTIMIZATION =====
+        // Only include system prompt on first message or if explicitly requested
+        const shouldIncludeSystemPrompt = options?.skipSystemPrompt === false || 
+                                          options?.isFirstMessage === true || 
+                                          options?.isFirstMessage === undefined; // Default: include (backward compatible)
+        
+        if (!shouldIncludeSystemPrompt) {
+          this.logger.log(`🚀 [OPTIMIZATION] Skipping system prompt (conversation continuation)`);
+          this.logger.log(`   Saved: ~${Math.ceil(systemPrompt.length / 4)} tokens (${systemPrompt.length} chars)`);
+        }
+        // ===== END SYSTEM PROMPT OPTIMIZATION =====
+
+        const bytezMessages = this.formatMessagesForBytez(messages, shouldIncludeSystemPrompt ? systemPrompt : '');
 
         // Extract provider and model from model string (e.g., "anthropic/claude-haiku-4-5")
         const [provider, modelName] = model.split('/');
@@ -97,13 +114,14 @@ export class BytezService implements BytebotAgentService {
 
         // Configure request based on endpoint type
         if (useNativeAnthropicEndpoint) {
-          // Native Anthropic endpoint: Use params object for tools
+          // PHASE 1 FIX: Native Anthropic endpoint requires tools at TOP LEVEL, not in params
           if (useTools) {
-            requestBody.params = {
-              max_tokens: 8192,
-              tools: tools,
-              tool_choice: { type: 'auto' },
-            };
+            // Validate tool format before sending
+            this.validateAnthropicTools(tools);
+            
+            requestBody.tools = tools;
+            requestBody.tool_choice = { type: 'auto' };
+            requestBody.max_tokens = 8192;
           }
           // System prompt will be extracted and added as requestBody.system below
         } else if (useTools) {
@@ -123,9 +141,9 @@ export class BytezService implements BytebotAgentService {
           }
         }
 
-        // Validate we have at least one message
+        // PHASE 4: Validate we have at least one message after system prompt extraction
         if (requestBody.messages.length === 0) {
-          this.logger.error(`Empty messages array! bytezMessages length: ${bytezMessages.length}`);
+          this.logger.error(`Empty messages array after system prompt extraction! Original count: ${bytezMessages.length}`);
           throw new Error('Cannot send request with empty messages array. This indicates a message formatting issue.');
         }
 
@@ -145,10 +163,34 @@ export class BytezService implements BytebotAgentService {
             `Bytez API error: ${response.status} - ${JSON.stringify(errorData)}`,
           );
           
-          // Mark key as failed and try next one
-          this.keyManager.markCurrentKeyAsFailed(error);
-          lastError = error;
-          continue;
+          // PHASE 2: Smart error classification
+          const errorType = this.classifyError(response.status, errorData, error);
+          
+          // PHASE 5: Enhanced logging
+          this.logger.error(
+            `[ERROR] Type: ${errorType}, Status: ${response.status}, Key: ${this.keyManager.getCurrentKeyIndex() + 1}/${this.keyManager.getTotalKeys()}, Error: ${error.message}`
+          );
+          
+          if (errorType === 'API_KEY_ERROR') {
+            // Rotate key for API key errors
+            this.keyManager.markCurrentKeyAsFailed(error);
+            this.logger.warn(`[KEY ROTATION] Rotating from Key ${this.keyManager.getCurrentKeyIndex() + 1} due to: ${errorType}`);
+            lastError = error;
+            continue;
+          } else if (errorType === 'FORMAT_ERROR') {
+            // Don't rotate for format errors - these are code bugs
+            this.logger.error(`[FORMAT ERROR] Not rotating keys - this is a request format issue`);
+            throw error;
+          } else if (errorType === 'TRANSIENT_ERROR') {
+            // For transient errors, retry with same key (will be handled by retry loop)
+            this.logger.warn(`[TRANSIENT ERROR] Retrying with same key`);
+            lastError = error;
+            continue;
+          } else {
+            // Unknown errors - throw immediately
+            this.logger.error(`[UNKNOWN ERROR] Throwing immediately`);
+            throw error;
+          }
         }
 
         const data = await response.json() as any;
@@ -156,32 +198,58 @@ export class BytezService implements BytebotAgentService {
         // Handle native Anthropic endpoint response (when using native endpoint)
         if (useNativeAnthropicEndpoint && useTools) {
           this.keyManager.markCurrentKeyAsSuccessful();
+          // PHASE 5: Log successful API call
+          this.logger.log(`[SUCCESS] API call completed with Key ${this.keyManager.getCurrentKeyIndex() + 1}`);
           return this.formatNativeAnthropicResponse(data);
         }
 
         // Handle OpenAI-compatible response format
         if (useTools && data.choices) {
           this.keyManager.markCurrentKeyAsSuccessful();
+          // PHASE 5: Log successful API call
+          this.logger.log(`[SUCCESS] API call completed with Key ${this.keyManager.getCurrentKeyIndex() + 1}`);
           return this.formatOpenAIResponse(data);
         }
 
         // Handle native Bytez response format (non-tool, non-Anthropic)
         if (data.error) {
-          const error = new Error(`Bytez error: ${data.error}`);
-          this.keyManager.markCurrentKeyAsFailed(error);
-          lastError = error;
-          continue;
+          // PHASE 2: Use smart error classification
+          const errorStr = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+          const error = new Error(`Bytez error: ${errorStr}`);
+          const errorType = this.classifyError(0, data, error);
+          
+          // PHASE 5: Enhanced logging
+          this.logger.error(
+            `[ERROR] Type: ${errorType}, Key: ${this.keyManager.getCurrentKeyIndex() + 1}/${this.keyManager.getTotalKeys()}, Error: ${errorStr}`
+          );
+          
+          if (errorType === 'FORMAT_ERROR') {
+            // Don't rotate keys for request format errors - these are code bugs
+            this.logger.error(`[FORMAT ERROR] Not rotating keys - this is a request format issue`);
+            throw error;
+          } else if (errorType === 'API_KEY_ERROR') {
+            // Rotate keys for API key errors
+            this.keyManager.markCurrentKeyAsFailed(error);
+            this.logger.warn(`[KEY ROTATION] Rotating from Key ${this.keyManager.getCurrentKeyIndex() + 1} due to: ${errorType}`);
+            lastError = error;
+            continue;
+          } else {
+            // For other errors, throw immediately
+            throw error;
+          }
         }
 
         if (!data.output || !data.output.content) {
+          // This is likely a response format issue, not an API key issue
           const error = new Error('No output content in Bytez response');
-          this.keyManager.markCurrentKeyAsFailed(error);
-          lastError = error;
-          continue;
+          this.logger.error(`[RESPONSE FORMAT ERROR] ${JSON.stringify(data)}`);
+          throw error;
         }
 
         // Mark key as successful
         this.keyManager.markCurrentKeyAsSuccessful();
+        // PHASE 5: Log successful API call
+        this.logger.log(`[SUCCESS] API call completed with Key ${this.keyManager.getCurrentKeyIndex() + 1}`);
         
         return {
           contentBlocks: this.formatBytezResponse(data.output),
@@ -336,7 +404,8 @@ export class BytezService implements BytebotAgentService {
             }
             break;
           case MessageContentType.ToolResult: {
-            // For OpenAI format, tool results are separate messages
+            // Tool results need to be added as content parts, not separate messages
+            // They will be collected and added as a user message later
             const content = block.content[0];
             let resultText: string;
             
@@ -351,10 +420,10 @@ export class BytezService implements BytebotAgentService {
                   : JSON.stringify(content);
             }
             
-            // Store tool result to be added as separate message
-            bytezMessages.push({
-              role: 'tool',
-              tool_call_id: block.tool_use_id,
+            // Add tool result as content part (Anthropic native format)
+            contentParts.push({
+              type: 'tool_result',
+              tool_use_id: block.tool_use_id,
               content: block.is_error ? `Error: ${resultText}` : resultText,
             });
             break;
@@ -384,11 +453,6 @@ export class BytezService implements BytebotAgentService {
         }
       }
 
-      // Skip tool result messages as they were already added above
-      if (messageContentBlocks.some(b => b.type === MessageContentType.ToolResult)) {
-        continue;
-      }
-
       if (message.role === Role.ASSISTANT) {
         const assistantMessage: any = {
           role: 'assistant',
@@ -408,23 +472,30 @@ export class BytezService implements BytebotAgentService {
           bytezMessages.push(assistantMessage);
         }
       } else if (message.role === Role.USER) {
-        if (hasImage && contentParts.length > 0) {
-          // Validate content parts before adding
+        // Check if this message contains tool results
+        const hasToolResults = messageContentBlocks.some(b => b.type === MessageContentType.ToolResult);
+        
+        if (hasToolResults || (hasImage && contentParts.length > 0)) {
+          // For tool results or images, use content parts array
           const validContentParts = contentParts.filter(part => {
             return part && typeof part === 'object' && part.type && 
               (part.type !== 'text' || part.text) && 
-              (part.type !== 'image' || part.url);
+              (part.type !== 'image' || (part.source && (part.source.data || part.source.url))) &&
+              (part.type !== 'tool_result' || part.tool_use_id);
           });
 
-          if (validContentParts.length === 0) {
-            this.logger.error(`All content parts invalid! Count: ${contentParts.length}`);
-            throw new Error('Cannot create USER message with no valid content parts');
+          if (validContentParts.length === 0 && textParts.length > 0) {
+            // Fallback to text if no valid content parts but we have text
+            bytezMessages.push({
+              role: 'user',
+              content: textParts.join('\n\n'),
+            });
+          } else if (validContentParts.length > 0) {
+            bytezMessages.push({
+              role: 'user',
+              content: validContentParts,
+            });
           }
-
-          bytezMessages.push({
-            role: 'user',
-            content: validContentParts,
-          });
         } else if (textParts.length > 0) {
           bytezMessages.push({
             role: 'user',
@@ -689,5 +760,87 @@ export class BytezService implements BytebotAgentService {
         },
       },
     ];
+  }
+
+  /**
+   * PHASE 2: Smart error classification
+   * Classifies errors to determine appropriate handling strategy
+   */
+  private classifyError(statusCode: number, errorData: any, error: Error): 'API_KEY_ERROR' | 'FORMAT_ERROR' | 'TRANSIENT_ERROR' | 'UNKNOWN_ERROR' {
+    const errorStr = typeof errorData.error === 'string' 
+      ? errorData.error 
+      : JSON.stringify(errorData);
+    const errorMessage = error.message.toLowerCase();
+
+    // API_KEY_ERROR: Issues with the API key itself (rotate key)
+    if (
+      statusCode === 401 ||
+      statusCode === 403 ||
+      errorMessage.includes('rate limit') ||
+      errorMessage.includes('quota') ||
+      errorMessage.includes('tokens per minute') ||
+      errorMessage.includes('tpm') ||
+      errorMessage.includes('rpm') ||
+      errorMessage.includes('invalid api key') ||
+      errorMessage.includes('unauthorized') ||
+      errorMessage.includes('insufficient') ||
+      errorMessage.includes('exceeded') ||
+      errorMessage.includes('billing') ||
+      errorMessage.includes('payment')
+    ) {
+      return 'API_KEY_ERROR';
+    }
+
+    // FORMAT_ERROR: Request format issues (don't rotate, throw immediately)
+    if (
+      statusCode === 400 ||
+      errorStr.includes('invalid_request_error') ||
+      errorStr.includes('Unexpected role') ||
+      errorStr.includes('messages:') ||
+      errorMessage.includes('invalid request') ||
+      errorMessage.includes('bad request') ||
+      errorMessage.includes('validation error') ||
+      errorMessage.includes('missing required')
+    ) {
+      return 'FORMAT_ERROR';
+    }
+
+    // TRANSIENT_ERROR: Temporary issues (retry with backoff)
+    if (
+      statusCode >= 500 ||
+      errorMessage.includes('timeout') ||
+      errorMessage.includes('network') ||
+      errorMessage.includes('connection') ||
+      errorMessage.includes('service unavailable') ||
+      errorMessage.includes('gateway')
+    ) {
+      return 'TRANSIENT_ERROR';
+    }
+
+    // UNKNOWN_ERROR: Unclassified errors (throw immediately)
+    return 'UNKNOWN_ERROR';
+  }
+
+  /**
+   * PHASE 3: Validate Anthropic tool format
+   * Ensures tools have input_schema (not parameters) before sending to API
+   */
+  private validateAnthropicTools(tools: any[]): void {
+    for (const tool of tools) {
+      if (!tool.name) {
+        throw new Error('Tool missing required "name" field');
+      }
+      if (!tool.input_schema) {
+        throw new Error(
+          `Tool "${tool.name}" missing required "input_schema" field. ` +
+          `Anthropic native API requires "input_schema", not "parameters".`
+        );
+      }
+      if (tool.parameters) {
+        this.logger.warn(
+          `Tool "${tool.name}" has "parameters" field but should use "input_schema" for Anthropic native API`
+        );
+      }
+    }
   }
 }

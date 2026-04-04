@@ -20,6 +20,23 @@ export const metadata: WorkflowMetadata = {
       default: '',
     },
   ],
+  user_steps: [
+    {
+      id: 'open-whatsapp',
+      title: 'Open WhatsApp',
+      description: 'Launch WhatsApp Web with persistent profile and navigate to chat.',
+    },
+    {
+      id: 'verify-chat',
+      title: 'Verify chat',
+      description: 'Wait for the chat window to load and textbox to be ready.',
+    },
+    {
+      id: 'send-messages',
+      title: 'Send messages',
+      description: 'Type and send each message in sequence if provided.',
+    },
+  ],
 };
 
 const MASTER_PROFILE_ID = 'prof_fc613b4d';

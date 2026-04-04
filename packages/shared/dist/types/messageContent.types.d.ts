@@ -197,15 +197,34 @@ export type AgentThinkingContentBlock = {
     thinking: string;
     timestamp: string;
 } & MessageContentBlockBase;
+export type WorkflowDisplayStep = {
+    id: string;
+    title: string;
+    description: string;
+    titleTemplate?: string;
+    descriptionTemplate?: string;
+};
+export type WorkflowVariableType = "string" | "number" | "boolean" | "object";
+export type WorkflowVariableDefinition = {
+    name: string;
+    type: WorkflowVariableType;
+    required: boolean;
+    description: string;
+    default?: unknown;
+};
 export type AgentPlanContentBlock = {
     type: MessageContentType.AgentPlan;
     agent: "ORCHESTRATOR";
     plan: {
         steps: Array<{
             id: string;
-            type: "web" | "desktop";
+            type: "web" | "desktop" | "workflow";
             description: string;
             success_criteria: string;
+            display_steps?: WorkflowDisplayStep[];
+            workflow_name?: string;
+            workflow_vars?: Record<string, any>;
+            workflow_var_definitions?: WorkflowVariableDefinition[];
         }>;
     };
     timestamp: string;

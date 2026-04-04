@@ -487,7 +487,7 @@ export class TasksService {
 
     try {
       // Emit event to trigger execution with approved plan
-      this.eventEmitter.emit('plan.approved', { taskId, approvedPlan });
+      await this.eventEmitter.emitAsync('plan.approved', { taskId, approvedPlan });
 
       this.logger.log(`Plan approved for task ${taskId} - execution will resume`);
     } catch (error) {

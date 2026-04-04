@@ -364,6 +364,10 @@ export class WebAgent extends BaseAgent {
       }
 
       // Call the appropriate service based on model provider with accumulated history
+      // ===== SYSTEM PROMPT OPTIMIZATION =====
+      const isFirstMessage = iteration === 1; // Only send system prompt on first iteration
+      // ===== END OPTIMIZATION =====
+      
       let response;
       if (this.model.provider === 'google') {
         this.logger.log(`🔧 Using Google service for model: ${this.model.model}`);
@@ -374,6 +378,7 @@ export class WebAgent extends BaseAgent {
           true, // Enable tool calling
           undefined, // No abort signal
           pinchTabTools, // Pass PinchTab tools
+          { isFirstMessage }, // NEW: Optimization flag
         );
       } else if (this.model.provider === 'bytez') {
         this.logger.log(`🔧 Using Bytez service for model: ${this.model.model}`);
@@ -383,6 +388,8 @@ export class WebAgent extends BaseAgent {
           this.model.model,
           true, // Enable tool calling
           undefined, // No abort signal
+          undefined, // Use default tools
+          { isFirstMessage }, // NEW: Optimization flag
         );
       } else {
         // Default to Groq
@@ -394,6 +401,7 @@ export class WebAgent extends BaseAgent {
           true, // Enable tool calling
           undefined, // No abort signal
           pinchTabTools, // Pass PinchTab tools
+          { isFirstMessage }, // NEW: Optimization flag
         );
       }
 

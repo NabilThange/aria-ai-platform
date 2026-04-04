@@ -17,6 +17,7 @@ async function logMessage(logger: WorkflowLogger, message: string): Promise<void
 export const metadata: WorkflowMetadata = {
   name: 'opencode-request',
   description: 'Universal coding assistant - creates websites, web apps, PowerPoint presentations (.pptx), PDF documents, Word files (.docx), Excel spreadsheets (.xlsx), Python scripts, Node.js apps, and more. Just describe what you want in natural language and OpenCode builds it using the appropriate libraries (pptxgenjs, reportlab, openpyxl, python-docx, etc.)',
+  summary: 'Turn a natural-language request into generated code, documents, or other build artifacts.',
   version: '3.0.0', // Upgraded to webhook-based completion
   timeout_ms: 600000, // 10 minutes (increased to allow OpenCode to work without pressure)
   variables: [
@@ -43,6 +44,28 @@ export const metadata: WorkflowMetadata = {
       type: 'string',
       required: false,
       description: 'Optional comma-separated list of email addresses to send results to. Example: "user1@example.com, user2@example.com". If not provided, OpenCode will use example addresses.',
+    },
+  ],
+  user_steps: [
+    {
+      id: 'interpret-request',
+      title: 'Interpret request',
+      description: 'Analyze the request and determine the correct output format.',
+    },
+    {
+      id: 'prepare-context',
+      title: 'Prepare context',
+      description: 'Gather any supporting files or delivery details needed for generation.',
+    },
+    {
+      id: 'generate-output',
+      title: 'Generate output',
+      description: 'Use OpenCode to create the requested code, document, or asset.',
+    },
+    {
+      id: 'deliver-output',
+      title: 'Deliver output',
+      description: 'Save the output and optionally send it to the requested recipients.',
     },
   ],
 };

@@ -80,14 +80,18 @@ export default function TaskPage() {
         console.error('Failed to check plan approval status:', error);
       }
     };
-    
-    // Check on initial load and when task status changes to NEEDS_HELP
-    if (taskStatus === TaskStatus.NEEDS_HELP) {
+
+    // Keep the approval card visible while task/shared state can still be in approval mode.
+    if (
+      taskStatus === TaskStatus.NEEDS_HELP ||
+      taskStatus === TaskStatus.RUNNING ||
+      isAwaitingPlanApproval
+    ) {
       checkPlanApprovalStatus();
     } else {
       setIsAwaitingPlanApproval(false);
     }
-  }, [taskId, taskStatus]);
+  }, [taskId, taskStatus, isAwaitingPlanApproval]);
 
   // React to agent status updates from WebSocket
   useEffect(() => {

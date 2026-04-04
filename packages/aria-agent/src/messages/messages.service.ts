@@ -39,6 +39,19 @@ export class MessagesService {
     role: Role;
     taskId: string;
   }): Promise<Message> {
+    // Skip database writes for manual workflow executions
+    if (data.taskId === 'manual-execution') {
+      // Return a mock message object for manual executions
+      return {
+        id: `manual-${Date.now()}`,
+        content: data.content as Prisma.InputJsonValue,
+        role: data.role,
+        taskId: data.taskId,
+        createdAt: new Date(),
+        summaryId: null,
+      } as Message;
+    }
+
     const message = await this.prisma.message.create({
       data: {
         content: data.content as Prisma.InputJsonValue,

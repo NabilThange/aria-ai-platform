@@ -1,3 +1,9 @@
+import {
+  WorkflowUserStep,
+  WorkflowVariable,
+} from '../../workflows/workflow.interface';
+import { ClarifiedTask } from '../clarifier/clarifier.types';
+
 /**
  * OrchestratorAgent Output Schema
  * Section 9.7 of architecture document
@@ -20,4 +26,27 @@ export interface ExecutionStep {
   // Workflow-specific fields (only used when type === 'workflow')
   workflow_name?: string;     // Name of workflow to execute
   workflow_vars?: Record<string, any>;  // Variables to pass to workflow
+  display_steps?: WorkflowUserStep[];   // UI-only workflow display steps
+  workflow_var_definitions?: WorkflowVariable[]; // UI-safe workflow input schema
 }
+
+export interface WorkflowSelectionContext {
+  workflow_name: string;
+  workflow_vars: Record<string, any>;
+  missing_vars?: string[];
+}
+
+export interface WorkflowClarificationResult {
+  kind: 'needs_clarification';
+  clarification: ClarifiedTask;
+  workflow_context: WorkflowSelectionContext;
+}
+
+export interface WorkflowPlanReadyResult {
+  kind: 'plan';
+  plan: ExecutionPlan;
+}
+
+export type OrchestratorPlanResult =
+  | WorkflowPlanReadyResult
+  | WorkflowClarificationResult;

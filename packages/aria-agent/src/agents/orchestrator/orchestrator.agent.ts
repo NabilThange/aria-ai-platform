@@ -3,9 +3,16 @@ import { BaseAgent, AgentResult } from '../base/base.agent';
 import { SharedStateService } from '../../shared-state/shared-state.service';
 import { BytezService } from '../../bytez/bytez.service';
 import { GroqService } from '../../groq/groq.service';
+import { GoogleService } from '../../google/google.service';
+import { OpenRouterService } from '../../openrouter/openrouter.service';
 import { AGENT_MODELS } from '../../config/agents.config';
 import { getAgentSystemPrompt } from '../../config/system-prompts.config';
-import { ExecutionPlan, ExecutionStep } from './orchestrator.types';
+import {
+  ExecutionPlan,
+  ExecutionStep,
+  OrchestratorPlanResult,
+  WorkflowSelectionContext,
+} from './orchestrator.types';
 import { ClarifiedTask } from '../clarifier/clarifier.types';
 import { extractJSON } from '../../utils/json.util';
 import { MessagesService } from '../../messages/messages.service';
@@ -13,6 +20,13 @@ import { AgentsService } from '../agents.service';
 import { BrowserLoggerService } from '../../logger/browser-logger.service';
 import { WorkflowService } from '../../services/workflow.service';
 import { workflowTools } from '../../groq/workflow.tools';
+import { MessageContentType } from '@bytebot/shared';
+import { Role } from '@prisma/client';
+import {
+  WorkflowMetadata,
+  WorkflowUserStep,
+  WorkflowVariable,
+} from '../../workflows/workflow.interface';
 
 /**
  * OrchestratorAgent - Creates and manages execution plans
@@ -28,6 +42,8 @@ export class OrchestratorAgent extends BaseAgent {
     sharedState: SharedStateService,
     private readonly bytezService: BytezService,
     private readonly groqService: GroqService,
+    private readonly googleService: GoogleService,
+    private readonly openrouterService: OpenRouterService,
     private readonly messagesService: MessagesService,
     private readonly agentsService: AgentsService,
     private readonly browserLogger: BrowserLoggerService,
@@ -69,8 +85,18 @@ export class OrchestratorAgent extends BaseAgent {
         this.logger.log('🧠 Using extended thinking for complex task');
       }
 
+      const existingWorkflowContext =
+        await this.readState<WorkflowSelectionContext | null>(
+          taskId,
+          'workflow_selection_context',
+        );
+
       // Build planning prompt
-      const prompt = this.buildPlanningPrompt(clarifiedTask, useExtendedThinking);
+      const prompt = this.buildPlanningPrompt(
+        clarifiedTask,
+        existingWorkflowContext,
+        useExtendedThinking,
+      );
 
       // LOG AGENT START TO BROWSER
       this.browserLogger.logAgentStart(taskId, 'ORCHESTRATOR_AGENT', {
@@ -92,11 +118,20 @@ export class OrchestratorAgent extends BaseAgent {
         },
       ];
 
+      // ===== REMOVED: AUTO-INJECT WORKFLOW CONTEXT =====
+      // REASON: Auto-injection adds 3,600+ tokens and causes Groq TPM limit errors
+      // The orchestrator has list_workflows() tool available - let it call the tool instead
+      // This reduces initial token count from ~12,791 to ~9,191 tokens
+      this.logger.log(`\n🔧 [PRE-PLANNING] Orchestrator will use list_workflows() tool to fetch workflows on-demand`);
+      // ===== END REMOVAL =====
+
       // ReAct loop: THOUGHT → ACTION → OBSERVATION → THOUGHT...
       const MAX_ITERATIONS = 10;
       let iteration = 0;
       let planGenerated = false;
       let finalResponse: any = null;
+      const planningContext: { selectedWorkflow?: WorkflowSelectionContext } =
+        {};
       
       // Get model config to determine tool format
       const modelConfig = this.getModel();
@@ -111,6 +146,14 @@ export class OrchestratorAgent extends BaseAgent {
         this.logger.log(`[ITERATION ${iteration}/${MAX_ITERATIONS}]`);
         this.logger.log(`${'-'.repeat(80)}`);
 
+        // ===== SYSTEM PROMPT OPTIMIZATION =====
+        // ===== SYSTEM PROMPT OPTIMIZATION =====
+        // Only send system prompt on first iteration to save tokens
+        // Fix C provides workflow decision hints in tool results, so orchestrator
+        // has workflow context even without system prompt on subsequent iterations
+        const isFirstMessage = iteration === 1;
+        // ===== END OPTIMIZATION =====
+
         // Call model service with accumulated conversation history
         const response = await this.callModelService(
           this.getSystemPrompt(useExtendedThinking),
@@ -119,6 +162,8 @@ export class OrchestratorAgent extends BaseAgent {
           true, // Enable tools for workflow discovery
           taskId, // Pass taskId for tool execution
           modelConfig, // Pass model config for tool format detection
+          isFirstMessage, // Only send system prompt on first iteration
+          planningContext,
         );
 
         // Check if response contains a plan (text content with JSON)
@@ -172,7 +217,51 @@ export class OrchestratorAgent extends BaseAgent {
       });
 
       // Parse execution plan
-      const plan = this.parseExecutionPlan(finalResponse);
+      const parsedPlan = this.parseExecutionPlan(
+        finalResponse,
+        planningContext.selectedWorkflow || existingWorkflowContext || undefined,
+      );
+      const enrichedPlan = await this.enrichPlanWithWorkflowDisplaySteps(
+        parsedPlan,
+      );
+      const planningResult = await this.validateWorkflowPlan(
+        enrichedPlan,
+        clarifiedTask,
+        taskId,
+      );
+
+      if (planningResult.kind === 'needs_clarification') {
+        await this.messagesService.createAgentActionMessage(
+          taskId,
+          'ORCHESTRATOR',
+          'question',
+          {
+            question: planningResult.clarification.question?.question,
+            questionId: planningResult.clarification.question?.id,
+            questionType: planningResult.clarification.question?.type,
+            required: planningResult.clarification.question?.required,
+          },
+        );
+        await this.sharedState.set(
+          taskId,
+          'pending_clarification_question',
+          planningResult.clarification.question?.question || null,
+        );
+        await this.sharedState.set(
+          taskId,
+          'workflow_selection_context',
+          planningResult.workflow_context,
+        );
+
+        return {
+          success: true,
+          data: planningResult,
+          tokensUsed: finalResponse.tokenUsage?.totalTokens || 0,
+          cost: this.calculateCost(finalResponse.tokenUsage?.totalTokens || 0),
+        };
+      }
+
+      const plan = planningResult.plan;
 
       // LOG ORCHESTRATOR OUTPUT
       this.logger.log(`🎯 [OrchestratorAgent] Generated plan:`);
@@ -192,6 +281,12 @@ export class OrchestratorAgent extends BaseAgent {
 
       // Write to shared state
       await this.writeState(taskId, 'execution_plan', plan);
+      await this.sharedState.set(taskId, 'pending_clarification_question', null);
+      await this.sharedState.set(
+        taskId,
+        'workflow_selection_context',
+        this.buildWorkflowSelectionContextFromPlan(plan),
+      );
 
       // Save plan as message
       await this.messagesService.createAgentActionMessage(
@@ -219,7 +314,7 @@ export class OrchestratorAgent extends BaseAgent {
 
       return {
         success: true,
-        data: plan,
+        data: planningResult,
         tokensUsed,
         cost: this.calculateCost(tokensUsed),
       };
@@ -235,14 +330,17 @@ export class OrchestratorAgent extends BaseAgent {
   /**
    * Create execution plan (convenience method for OrchestrationService)
    */
-  async plan(clarifiedTask: ClarifiedTask, taskId: string): Promise<ExecutionPlan> {
+  async plan(
+    clarifiedTask: ClarifiedTask,
+    taskId: string,
+  ): Promise<OrchestratorPlanResult> {
     const result = await this.run(clarifiedTask, taskId);
 
     if (!result.success) {
       throw new Error(`Planning failed: ${result.error}`);
     }
 
-    return result.data as ExecutionPlan;
+    return result.data as OrchestratorPlanResult;
   }
 
   /**
@@ -290,7 +388,8 @@ export class OrchestratorAgent extends BaseAgent {
       );
 
       // Parse new execution plan
-      const newPlan = this.parseExecutionPlan(response);
+      const parsedPlan = this.parseExecutionPlan(response);
+      const newPlan = await this.enrichPlanWithWorkflowDisplaySteps(parsedPlan);
 
       // Validate new plan
       if (!newPlan.steps || newPlan.steps.length === 0) {
@@ -343,15 +442,11 @@ export class OrchestratorAgent extends BaseAgent {
     useTools: boolean,
     taskId?: string,
     modelConfig?: any, // Model config for tool format detection
+    isFirstMessage: boolean = false, // NEW: Only send system prompt on first message
+    planningContext?: { selectedWorkflow?: WorkflowSelectionContext },
   ): Promise<any> {
-    // Determine provider from model string
-    // Groq models: openai/gpt-oss-*, meta-llama/llama-*
-    // Bytez models: anthropic/*, google/*, qwen/*, etc.
-    const isGroqModel = 
-      model.includes('gpt-oss') || 
-      model.includes('llama-') ||
-      model.startsWith('openai/') ||
-      model.startsWith('meta-llama/');
+    // Use provider from modelConfig if available, otherwise infer from model string
+    const provider = modelConfig?.provider || this.inferProviderFromModel(model);
     
     let response: any;
     
@@ -365,7 +460,7 @@ export class OrchestratorAgent extends BaseAgent {
     const isAnthropicModel = model.startsWith('anthropic/');
     const toolsToUse = isAnthropicModel ? anthropicWorkflowTools : workflowTools;
     
-    if (isGroqModel) {
+    if (provider === 'groq') {
       this.logger.log(`🔧 Using Groq service for model: ${model}`);
       response = await this.groqService.generateMessage(
         systemPrompt,
@@ -374,6 +469,29 @@ export class OrchestratorAgent extends BaseAgent {
         useTools,
         undefined, // No abort signal
         workflowTools, // Groq always uses OpenAI format
+        { isFirstMessage }, // NEW: Pass optimization flag
+      );
+    } else if (provider === 'google') {
+      this.logger.log(`🔧 Using Google service for model: ${model}`);
+      response = await this.googleService.generateMessage(
+        systemPrompt,
+        messages,
+        model,
+        useTools,
+        undefined, // No abort signal
+        workflowTools, // Google uses OpenAI format
+        { isFirstMessage }, // NEW: Pass optimization flag
+      );
+    } else if (provider === 'openrouter') {
+      this.logger.log(`🔧 Using OpenRouter service for model: ${model}`);
+      response = await this.openrouterService.generateMessage(
+        systemPrompt,
+        messages,
+        model,
+        useTools,
+        undefined, // No abort signal
+        workflowTools, // OpenRouter uses OpenAI format
+        { isFirstMessage }, // NEW: Pass optimization flag
       );
     } else {
       this.logger.log(`🔧 Using Bytez service for model: ${model} (tool format: ${isAnthropicModel ? 'Anthropic' : 'OpenAI'})`);
@@ -384,6 +502,7 @@ export class OrchestratorAgent extends BaseAgent {
         useTools,
         undefined, // No abort signal
         toolsToUse, // Use appropriate tool format
+        { isFirstMessage }, // NEW: Pass optimization flag
       );
     }
     
@@ -436,6 +555,17 @@ export class OrchestratorAgent extends BaseAgent {
           if (!success) {
             throw new Error(error);
           }
+
+          if (
+            toolCall.name === 'use_workflow' &&
+            result?.workflow_name &&
+            planningContext
+          ) {
+            planningContext.selectedWorkflow = {
+              workflow_name: result.workflow_name,
+              workflow_vars: result.workflow_vars || {},
+            };
+          }
           
           return result;
         })
@@ -468,8 +598,29 @@ export class OrchestratorAgent extends BaseAgent {
         this.logger.log(`   ${toolCalls[index].name}: ${resultStr.substring(0, 200)}${resultStr.length > 200 ? '...' : ''}`);
       });
       
+      // ===== MESSAGE HISTORY TRUNCATION =====
+      // Keep conversation history manageable to reduce token usage
+      // Keep first 2 messages (initial prompt + workflow context) and last 10 messages
+      const MAX_MESSAGES = 12;
+      if (messages.length > MAX_MESSAGES) {
+        const firstMessages = messages.slice(0, 2); // Keep initial prompt + workflow context
+        const recentMessages = messages.slice(-(MAX_MESSAGES - 2)); // Keep last 10 messages
+        messages.splice(0, messages.length, ...firstMessages, ...recentMessages);
+        this.logger.log(`   🔄 Truncated conversation history: ${messages.length} messages (kept first 2 + last 10)`);
+      }
+      // ===== END TRUNCATION =====
+      
       // Recursive call with accumulated conversation history
-      return await this.callModelService(systemPrompt, messages, model, useTools, taskId);
+      return await this.callModelService(
+        systemPrompt,
+        messages,
+        model,
+        useTools,
+        taskId,
+        modelConfig,
+        false,
+        planningContext,
+      ); // Subsequent calls: isFirstMessage=false
     }
     
     return response;
@@ -518,19 +669,46 @@ export class OrchestratorAgent extends BaseAgent {
             this.logger.log(`   ✅ SAFE PAYLOAD: ${estimatedTokens} tokens (within safe limits)`);
           }
           this.logger.log(`${'='.repeat(80)}\n`);
-          
-          // Return the full workflows array to prevent the need for additional tool calls
+          await this.persistImportantWorkflowToolResult(
+            taskId,
+            'list_workflows',
+            workflows,
+          );
+          // Return the compressed workflows array
           return workflows;
+        
+        case 'read_workflow':
+          const workflowName = input.name;
+          this.logger.log(`   Reading workflow: ${workflowName}`);
+          
+          const workflowDetails = await this.workflowService.readWorkflow(workflowName);
+          
+          // Log size of full workflow details
+          const detailsJson = JSON.stringify(workflowDetails);
+          const detailsTokens = Math.ceil(detailsJson.length / 4);
+          this.logger.log(`   Workflow details: ${detailsTokens} tokens (${(detailsJson.length / 1024).toFixed(2)} KB)`);
+          await this.persistImportantWorkflowToolResult(
+            taskId,
+            `read_workflow:${workflowName}`,
+            workflowDetails,
+          );
+          return workflowDetails;
           
         case 'use_workflow':
           // Store workflow usage intent - will be included in execution plan
           this.logger.log(`   Workflow "${input.name}" will be added to execution plan`);
-          return {
+          const workflowIntentResult = {
             success: true,
             message: `Workflow "${input.name}" will be executed with variables: ${JSON.stringify(input.variables)}`,
             workflow_name: input.name,
             workflow_vars: input.variables,
           };
+          await this.persistImportantWorkflowToolResult(
+            taskId,
+            `use_workflow:${input.name}`,
+            workflowIntentResult,
+          );
+          return workflowIntentResult;
           
         default:
           this.logger.warn(`   Unknown tool: ${name}`);
@@ -540,6 +718,29 @@ export class OrchestratorAgent extends BaseAgent {
       this.logger.error(`   Tool execution failed: ${error.message}`);
       return { error: error.message };
     }
+  }
+
+  private async persistImportantWorkflowToolResult(
+    taskId: string,
+    toolUseId: string,
+    result: any,
+  ): Promise<void> {
+    await this.messagesService.create({
+      taskId,
+      role: Role.ASSISTANT,
+      content: [
+        {
+          type: MessageContentType.ToolResult,
+          tool_use_id: toolUseId,
+          content: [
+            {
+              type: MessageContentType.Text,
+              text: JSON.stringify(result, null, 2),
+            } as any,
+          ],
+        } as any,
+      ],
+    });
   }
 
   private getSystemPrompt(useExtendedThinking: boolean = false): string {
@@ -583,7 +784,11 @@ export class OrchestratorAgent extends BaseAgent {
     return hasComplexityIndicators;
   }
 
-  private buildPlanningPrompt(clarifiedTask: ClarifiedTask, useExtendedThinking: boolean = false): string {
+  private buildPlanningPrompt(
+    clarifiedTask: ClarifiedTask,
+    workflowContext: WorkflowSelectionContext | null = null,
+    useExtendedThinking: boolean = false,
+  ): string {
     const basePrompt = `Create an execution plan for this task:
 
 **Goal**: ${clarifiedTask.clarified_goal}
@@ -594,8 +799,40 @@ export class OrchestratorAgent extends BaseAgent {
 
 **Assumptions**: ${clarifiedTask.assumptions.length > 0 ? clarifiedTask.assumptions.join(', ') : 'None'}`;
 
+    const workflowContextPrompt = workflowContext
+      ? `
+
+**Existing Workflow Context**:
+- Previously selected workflow: ${workflowContext.workflow_name}
+- Known workflow variables: ${JSON.stringify(workflowContext.workflow_vars)}
+- Missing workflow variables already requested: ${workflowContext.missing_vars?.join(', ') || 'None'}
+- If the user's latest clarification answers the missing values, continue with this same workflow and output a canonical workflow step.`
+      : '';
+
+    const workflowDisciplinePrompt = `
+
+**Workflow Planning Discipline**:
+- If you intend to use any workflow, call read_workflow(name) before use_workflow(name).
+- Do not invent workflow variable names. Copy the exact variable names from read_workflow(name).
+- Do not plan a workflow from list_workflows() alone.`;
+
+    const leadGenWorkflowPrompt = this.shouldPreferFreelancerResearchEmail(
+      clarifiedTask,
+    )
+      ? `
+
+**Workflow Preference**:
+- Prefer freelancer-research-email for local business research + spreadsheet + email tasks like this.
+- Avoid chaining deep-research + opencode-request + send-email-n8n when freelancer-research-email already fits.`
+      : '';
+
     if (useExtendedThinking) {
-      return basePrompt + `
+      return (
+        basePrompt +
+        workflowContextPrompt +
+        workflowDisciplinePrompt +
+        leadGenWorkflowPrompt +
+        `
 
 This is a complex task. Take time to think through:
 - What are the critical decision points?
@@ -604,12 +841,50 @@ This is a complex task. Take time to think through:
 - How can we verify success at each step?
 - Can any steps be combined to reduce context loss?
 
-Create a detailed step-by-step plan. Respond with JSON only, following the exact schema in the system prompt.`;
+Create a detailed step-by-step plan. Respond with JSON only, following the exact schema in the system prompt.`
+      );
     }
 
-    return basePrompt + `
+    return (
+      basePrompt +
+      workflowContextPrompt +
+      workflowDisciplinePrompt +
+      leadGenWorkflowPrompt +
+      `
 
-Create a detailed step-by-step plan. Respond with JSON only, following the exact schema in the system prompt.`;
+Create a detailed step-by-step plan. Respond with JSON only, following the exact schema in the system prompt.`
+    );
+  }
+
+  private shouldPreferFreelancerResearchEmail(
+    clarifiedTask: ClarifiedTask,
+  ): boolean {
+    const combinedText = [
+      clarifiedTask.original_input,
+      clarifiedTask.clarified_goal,
+      ...(clarifiedTask.constraints || []),
+      ...(clarifiedTask.assumptions || []),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    const mentionsBusinessResearch =
+      /\bcoffee shop|coffee shops|business|businesses|freelancer|lead\b/.test(
+        combinedText,
+      );
+    const mentionsLocation =
+      /\bmumbai\b|\bin\s+[a-z]/.test(combinedText);
+    const wantsSpreadsheet =
+      /\bexcel\b|\bspreadsheet\b|\bcsv\b/.test(combinedText);
+    const wantsDelivery = /\bemail\b|\bsend\b/.test(combinedText);
+
+    return (
+      mentionsBusinessResearch &&
+      mentionsLocation &&
+      wantsSpreadsheet &&
+      wantsDelivery
+    );
   }
 
   private buildReplanningPrompt(
@@ -639,7 +914,10 @@ Create a COMPLETELY NEW plan that avoids the previous failure. Consider:
 Respond with JSON only, following the exact schema in the system prompt.`;
   }
 
-  private parseExecutionPlan(response: any): ExecutionPlan {
+  private parseExecutionPlan(
+    response: any,
+    selectedWorkflow?: WorkflowSelectionContext,
+  ): ExecutionPlan {
     const content = response.contentBlocks?.[0]?.text || '';
 
     try {
@@ -654,7 +932,7 @@ Respond with JSON only, following the exact schema in the system prompt.`;
       })}`);
 
       // Normalize to ExecutionPlan format - accept various schema formats
-      // Handle nested structures: { plan: { steps: [...] } } or { steps: [...] } or { plan: [...] }
+      // Handle nested structures: { plan: { steps: [...] } } or { steps: [...] } or { plan: [...] } or { execution_plan: [...] }
       let stepsArray: any[] = [];
       
       if (parsed.steps && Array.isArray(parsed.steps)) {
@@ -666,9 +944,13 @@ Respond with JSON only, following the exact schema in the system prompt.`;
       } else if (parsed.plan && parsed.plan.steps && Array.isArray(parsed.plan.steps)) {
         // Format: { plan: { steps: [...] } }
         stepsArray = parsed.plan.steps;
+      } else if (parsed.execution_plan && Array.isArray(parsed.execution_plan)) {
+        // Format: { execution_plan: [...] }
+        stepsArray = parsed.execution_plan;
       }
       
-      const steps = stepsArray.map((s: any, i: number) => {
+      const steps = stepsArray.map((rawStep: any, i: number) => {
+        const s = this.normalizeWorkflowIntentStep(rawStep, selectedWorkflow);
         // Infer type from multiple sources
         let stepType = s.type;
         
@@ -681,39 +963,56 @@ Respond with JSON only, following the exact schema in the system prompt.`;
           const context = (contextStr || fallback || '').toLowerCase();
           const combined = description + ' ' + context;
           
-          // Web indicators (browser-based actions)
-          const webIndicators = [
-            'navigate', 'browser', 'web', 'url', 'website', 'search google',
-            'search for', 'click button on', 'fill form', 'submit form',
-            'web page', 'webpage', 'http', 'https', 'gmail.com', 'google.com',
-            'wikipedia', 'youtube', 'facebook', 'twitter', 'linkedin',
-            'open website', 'go to website', 'visit website', 'load page',
-            'scroll page', 'click link', 'web element', 'web search'
+          // FIX 2: Check for workflow indicators FIRST (highest priority)
+          const workflowIndicators = [
+            'workflow', 'execute workflow', 'run workflow', 'use workflow',
+            'use the workflow', 'execute the workflow', 'run the workflow'
           ];
           
-          // Desktop indicators (OS-level actions)
-          const desktopIndicators = [
-            'terminal', 'command', 'file', 'folder', 'directory',
-            'open chrome', 'open firefox', 'open application', 'launch app',
-            'screenshot', 'desktop', 'window', 'click icon', 'type in',
-            'paste in', 'keyboard', 'mouse', 'cursor', 'vnc', 'chromium'
-          ];
+          const hasWorkflowIndicator = workflowIndicators.some(indicator => combined.includes(indicator));
+          const hasWorkflowVars = !!(s.workflow_vars || s.variables);
+          const hasWorkflowName = !!(s.workflow_name);
           
-          // Count matches for each type
-          const webMatches = webIndicators.filter(indicator => combined.includes(indicator)).length;
-          const desktopMatches = desktopIndicators.filter(indicator => combined.includes(indicator)).length;
+          if (hasWorkflowIndicator || hasWorkflowVars || hasWorkflowName) {
+            stepType = 'workflow';
+            this.logger.log(`🔍 [FIX 2] Step ${i + 1} inferred as 'workflow' (indicator: ${hasWorkflowIndicator}, vars: ${hasWorkflowVars}, name: ${hasWorkflowName})`);
+          }
           
-          // Assign type based on matches
-          if (webMatches > desktopMatches) {
-            stepType = 'web';
-            this.logger.warn(`⚠️  Step ${i + 1} missing type field - inferred as 'web' from description`);
-          } else if (desktopMatches > webMatches) {
-            stepType = 'desktop';
-            this.logger.warn(`⚠️  Step ${i + 1} missing type field - inferred as 'desktop' from description`);
-          } else {
-            // Default to desktop if unclear, but log warning
-            stepType = 'desktop';
-            this.logger.warn(`⚠️  Step ${i + 1} missing type field - defaulting to 'desktop' (description: "${description.substring(0, 50)}...")`);
+          // Web indicators (browser-based actions) - check only if not workflow
+          if (!stepType) {
+            const webIndicators = [
+              'navigate', 'browser', 'web', 'url', 'website', 'search google',
+              'search for', 'click button on', 'fill form', 'submit form',
+              'web page', 'webpage', 'http', 'https', 'gmail.com', 'google.com',
+              'wikipedia', 'youtube', 'facebook', 'twitter', 'linkedin',
+              'open website', 'go to website', 'visit website', 'load page',
+              'scroll page', 'click link', 'web element', 'web search'
+            ];
+            
+            // Desktop indicators (OS-level actions)
+            const desktopIndicators = [
+              'terminal', 'command', 'file', 'folder', 'directory',
+              'open chrome', 'open firefox', 'open application', 'launch app',
+              'screenshot', 'desktop', 'window', 'click icon', 'type in',
+              'paste in', 'keyboard', 'mouse', 'cursor', 'vnc', 'chromium'
+            ];
+            
+            // Count matches for each type
+            const webMatches = webIndicators.filter(indicator => combined.includes(indicator)).length;
+            const desktopMatches = desktopIndicators.filter(indicator => combined.includes(indicator)).length;
+            
+            // Assign type based on matches
+            if (webMatches > desktopMatches) {
+              stepType = 'web';
+              this.logger.warn(`⚠️  Step ${i + 1} missing type field - inferred as 'web' from description`);
+            } else if (desktopMatches > webMatches) {
+              stepType = 'desktop';
+              this.logger.warn(`⚠️  Step ${i + 1} missing type field - inferred as 'desktop' from description`);
+            } else {
+              // Default to desktop if unclear, but log warning
+              stepType = 'desktop';
+              this.logger.warn(`⚠️  Step ${i + 1} missing type field - defaulting to 'desktop' (description: "${description.substring(0, 50)}...")`);
+            }
           }
         }
         
@@ -731,6 +1030,7 @@ Respond with JSON only, following the exact schema in the system prompt.`;
           success_criteria: s.success_criteria || s.expected_outcome || s.expected_output || '',
           context: s.context || s.fallback || '',
           depends_on: s.depends_on || [],
+          display_steps: Array.isArray(s.display_steps) ? s.display_steps : undefined,
         };
         
         // Add workflow-specific fields if this is a workflow step
@@ -815,6 +1115,632 @@ Respond with JSON only, following the exact schema in the system prompt.`;
     }
   }
 
+  private normalizeWorkflowIntentStep(
+    rawStep: any,
+    selectedWorkflow?: WorkflowSelectionContext,
+  ): any {
+    const description = String(rawStep?.description || rawStep?.action || '');
+    const selectedWorkflowName = selectedWorkflow?.workflow_name;
+    const nestedInput =
+      rawStep?.workflow ||
+      rawStep?.arguments ||
+      rawStep?.params ||
+      rawStep?.parameters ||
+      rawStep?.input ||
+      rawStep?.tool_input ||  // FIX 4: Add tool_input to nested input sources
+      {};
+    const useWorkflowIntent =
+      rawStep?.tool === 'use_workflow' ||
+      rawStep?.action === 'use_workflow' ||
+      rawStep?.method === 'use_workflow' ||
+      rawStep?.command === 'use_workflow';
+
+    // FIX 1: Check for workflow_vars or variables field (strong indicator it's a workflow step)
+    const hasWorkflowVars = !!(
+      rawStep?.workflow_vars ||
+      rawStep?.variables ||
+      rawStep?.tool_input?.variables ||  // FIX 4: Check tool_input.variables
+      nestedInput?.workflow_vars ||
+      nestedInput?.variables
+    );
+
+    const explicitWorkflowName =
+      typeof rawStep?.workflow_name === 'string'
+        ? rawStep.workflow_name
+        : typeof rawStep?.workflow_id === 'string'
+          ? rawStep.workflow_id
+        : typeof rawStep?.workflow?.name === 'string'
+          ? rawStep.workflow.name
+          : typeof rawStep?.tool_input?.name === 'string' && useWorkflowIntent  // FIX 4: Check tool_input.name
+            ? rawStep.tool_input.name
+            : typeof nestedInput?.workflow_name === 'string'
+              ? nestedInput.workflow_name
+              : typeof nestedInput?.workflow_id === 'string'
+                ? nestedInput.workflow_id
+                : typeof nestedInput?.name === 'string' && useWorkflowIntent
+                  ? nestedInput.name
+            : typeof rawStep?.name === 'string' &&
+                (useWorkflowIntent ||
+                  rawStep?.type === 'workflow' ||
+                  hasWorkflowVars)
+              ? rawStep.name
+              : undefined;
+
+    // FIX 1: Extract workflow name from description using regex pattern
+    let descriptionWorkflowName: string | undefined = undefined;
+    if (!explicitWorkflowName && description) {
+      // Pattern: "use/execute/run [the] <workflow-name> workflow"
+      const workflowPattern = /(?:use|execute|run)\s+(?:the\s+)?([a-z0-9-]+)\s+workflow/i;
+      const match = description.match(workflowPattern);
+      if (match && match[1]) {
+        descriptionWorkflowName = match[1];
+        this.logger.log(`🔍 [FIX 1] Detected workflow name from description: "${descriptionWorkflowName}"`);
+      }
+    }
+
+    const fallbackWorkflowName =
+      selectedWorkflowName &&
+      (useWorkflowIntent ||
+        description.toLowerCase().includes(selectedWorkflowName.toLowerCase()) ||
+        /selected workflow/i.test(description))
+        ? selectedWorkflowName
+        : undefined;
+
+    const workflowName = explicitWorkflowName || descriptionWorkflowName || fallbackWorkflowName;
+
+    if (!workflowName) {
+      this.logger.debug(
+        `Workflow normalization skipped for step "${rawStep?.id || rawStep?.step || 'unknown'}"`,
+      );
+      return rawStep;
+    }
+
+    this.logger.debug(
+      `Workflow normalization applied for step "${rawStep?.id || rawStep?.step || 'unknown'}": ${workflowName}`,
+    );
+
+    // FIX 4: Extract variables from all possible locations including tool_input
+    const extractedVars = {
+      ...(selectedWorkflow?.workflow_name === workflowName
+        ? selectedWorkflow?.workflow_vars || {}
+        : {}),
+      ...(rawStep?.tool_input?.variables || {}),  // FIX 4: Extract from tool_input.variables
+      ...(nestedInput?.workflow_vars ||
+        nestedInput?.variables ||
+        rawStep?.workflow_vars ||
+        rawStep?.variables ||
+        rawStep?.workflow?.variables ||
+        {}),
+    };
+
+    this.logger.log(
+      `🔍 [FIX 4] Extracted workflow variables for "${workflowName}": ${JSON.stringify(extractedVars)}`,
+    );
+
+    return {
+      ...rawStep,
+      type: 'workflow',
+      workflow_name: workflowName,
+      workflow_vars: extractedVars,
+    };
+  }
+
+  private async validateWorkflowPlan(
+    plan: ExecutionPlan,
+    clarifiedTask: ClarifiedTask,
+    taskId: string,
+  ): Promise<OrchestratorPlanResult> {
+    const storedWorkflowContext =
+      await this.readState<WorkflowSelectionContext | null>(
+        taskId,
+        'workflow_selection_context',
+      );
+
+    const validatedSteps = await Promise.all(
+      plan.steps.map(async (step) => {
+        if (step.type !== 'workflow' || !step.workflow_name) {
+          return step;
+        }
+
+        let metadata: WorkflowMetadata;
+        try {
+          metadata = await this.workflowService.readWorkflow(step.workflow_name);
+        } catch (error) {
+          this.logger.warn(
+            `Workflow validation failed because "${step.workflow_name}" could not be loaded: ${error.message}`,
+          );
+          return this.buildUnknownWorkflowClarificationResult(
+            clarifiedTask,
+            step,
+            error.message,
+          );
+        }
+
+        const mergedVars = this.mergeWorkflowVariables(
+          storedWorkflowContext?.workflow_name === step.workflow_name
+            ? storedWorkflowContext.workflow_vars
+            : undefined,
+          step.workflow_vars,
+        );
+
+        const resolvedVars = { ...mergedVars };
+        metadata.variables.forEach((variable) => {
+          const hasValue =
+            resolvedVars[variable.name] !== undefined &&
+            resolvedVars[variable.name] !== null &&
+            resolvedVars[variable.name] !== '';
+
+          if (!hasValue && variable.default !== undefined) {
+            resolvedVars[variable.name] = variable.default;
+          }
+        });
+
+        const invalidVars = metadata.variables
+          .filter((variable) => resolvedVars[variable.name] !== undefined)
+          .filter((variable) =>
+            !this.isWorkflowVariableTypeValid(
+              resolvedVars[variable.name],
+              variable.type,
+            ),
+          );
+
+        const missingVars = metadata.variables
+          .filter((variable) => variable.required)
+          .filter((variable) => {
+            const hasValue =
+              resolvedVars[variable.name] !== undefined &&
+              resolvedVars[variable.name] !== null &&
+              resolvedVars[variable.name] !== '';
+            return !hasValue;
+          });
+
+        if (invalidVars.length > 0) {
+          return this.buildInvalidWorkflowVariableClarificationResult(
+            clarifiedTask,
+            step,
+            metadata,
+            resolvedVars,
+            invalidVars.map((variable) => ({
+              name: variable.name,
+              type: variable.type,
+              description: variable.description,
+            })),
+          );
+        }
+
+        if (missingVars.length > 0) {
+          return this.buildWorkflowClarificationResult(
+            clarifiedTask,
+            step,
+            metadata,
+            resolvedVars,
+            missingVars.map((variable) => variable.name),
+          );
+        }
+
+        // Re-interpolate display steps with the final resolved variables
+        const displaySteps = step.display_steps
+          ? this.interpolateWorkflowDisplaySteps(step.display_steps, resolvedVars)
+          : undefined;
+
+        return {
+          ...step,
+          description: this.buildWorkflowExecutionSummary(
+            metadata.name,
+            resolvedVars,
+          ),
+          workflow_vars: resolvedVars,
+          workflow_var_definitions: this.cloneWorkflowVariableDefinitions(
+            metadata.variables,
+          ),
+          display_steps: displaySteps,
+        };
+      }),
+    );
+
+    const clarificationResult = validatedSteps.find(
+      (step): step is Exclude<OrchestratorPlanResult, { kind: 'plan' }> =>
+        (step as OrchestratorPlanResult).kind === 'needs_clarification',
+    );
+
+    if (clarificationResult) {
+      return clarificationResult;
+    }
+
+    return {
+      kind: 'plan',
+      plan: {
+        ...plan,
+        steps: validatedSteps as ExecutionStep[],
+      },
+    };
+  }
+
+  private buildWorkflowClarificationResult(
+    clarifiedTask: ClarifiedTask,
+    step: ExecutionStep,
+    metadata: WorkflowMetadata,
+    workflowVars: Record<string, any>,
+    missingVars: string[],
+  ): OrchestratorPlanResult {
+    const missingVarDescriptions = metadata.variables
+      .filter((variable) => missingVars.includes(variable.name))
+      .map((variable) => `${variable.name}: ${variable.description}`);
+    const knownValuesSummary = this.describeKnownWorkflowValues(
+      workflowVars,
+      missingVars,
+    );
+
+    const questionText =
+      missingVars.length === 1
+        ? `I can use the ${metadata.name} workflow, but I still need ${missingVars[0]}. ${missingVarDescriptions[0]}. ${knownValuesSummary} What should I use?`
+        : `I can use the ${metadata.name} workflow, but I still need these required inputs: ${missingVarDescriptions.join('; ')}. ${knownValuesSummary} Please provide them so I can finish the plan.`;
+
+    return {
+      kind: 'needs_clarification',
+      clarification: {
+        original_input: clarifiedTask.original_input,
+        clarified_goal: 'REQUIRES_USER_CLARIFICATION',
+        constraints: clarifiedTask.constraints,
+        assumptions: clarifiedTask.assumptions,
+        task_type: clarifiedTask.task_type,
+        questions_asked: 1,
+        question: {
+          id: 'workflow_missing_vars',
+          question: questionText,
+          type: 'text',
+          required: true,
+        },
+      },
+      workflow_context: {
+        workflow_name: step.workflow_name!,
+        workflow_vars: workflowVars,
+        missing_vars: missingVars,
+      },
+    };
+  }
+
+  private buildUnknownWorkflowClarificationResult(
+    clarifiedTask: ClarifiedTask,
+    step: ExecutionStep,
+    errorMessage: string,
+  ): OrchestratorPlanResult {
+    return {
+      kind: 'needs_clarification',
+      clarification: {
+        original_input: clarifiedTask.original_input,
+        clarified_goal: 'REQUIRES_USER_CLARIFICATION',
+        constraints: clarifiedTask.constraints,
+        assumptions: clarifiedTask.assumptions,
+        task_type: clarifiedTask.task_type,
+        questions_asked: 1,
+        question: {
+          id: 'workflow_not_found',
+          question: `I tried to plan this with the workflow "${step.workflow_name}", but that workflow is not available right now. ${errorMessage}. Please restate the task details so I can pick the correct workflow.`,
+          type: 'text',
+          required: true,
+        },
+      },
+      workflow_context: {
+        workflow_name: step.workflow_name!,
+        workflow_vars: step.workflow_vars || {},
+      },
+    };
+  }
+
+  private buildInvalidWorkflowVariableClarificationResult(
+    clarifiedTask: ClarifiedTask,
+    step: ExecutionStep,
+    metadata: WorkflowMetadata,
+    workflowVars: Record<string, any>,
+    invalidVars: Array<{ name: string; type: string; description: string }>,
+  ): OrchestratorPlanResult {
+    const invalidDescriptions = invalidVars.map(
+      (variable) =>
+        `${variable.name} is currently ${this.describeWorkflowValue(
+          workflowVars[variable.name],
+        )} but should be a ${variable.type} (${variable.description})`,
+    );
+    const knownValuesSummary = this.describeKnownWorkflowValues(
+      workflowVars,
+      invalidVars.map((variable) => variable.name),
+    );
+
+    return {
+      kind: 'needs_clarification',
+      clarification: {
+        original_input: clarifiedTask.original_input,
+        clarified_goal: 'REQUIRES_USER_CLARIFICATION',
+        constraints: clarifiedTask.constraints,
+        assumptions: clarifiedTask.assumptions,
+        task_type: clarifiedTask.task_type,
+        questions_asked: 1,
+        question: {
+          id: 'workflow_invalid_vars',
+          question: `I can use the ${metadata.name} workflow, but these values need to be corrected: ${invalidDescriptions.join('; ')}. ${knownValuesSummary} Please provide the corrected value${invalidVars.length > 1 ? 's' : ''}.`,
+          type: 'text',
+          required: true,
+        },
+      },
+      workflow_context: {
+        workflow_name: step.workflow_name!,
+        workflow_vars: workflowVars,
+        missing_vars: invalidVars.map((variable) => variable.name),
+      },
+    };
+  }
+
+  private isWorkflowVariableTypeValid(
+    value: any,
+    expectedType: 'string' | 'number' | 'boolean' | 'object',
+  ): boolean {
+    if (value === null || value === undefined) {
+      return true;
+    }
+
+    if (expectedType === 'object') {
+      return typeof value === 'object' && !Array.isArray(value);
+    }
+
+    return typeof value === expectedType;
+  }
+
+  private mergeWorkflowVariables(
+    storedWorkflowVars?: Record<string, any>,
+    stepWorkflowVars?: Record<string, any>,
+  ): Record<string, any> {
+    const mergedVars = {
+      ...(storedWorkflowVars || {}),
+    };
+
+    Object.entries(stepWorkflowVars || {}).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') {
+        return;
+      }
+
+      mergedVars[key] = value;
+    });
+
+    return mergedVars;
+  }
+
+  private buildWorkflowSelectionContextFromPlan(
+    plan: ExecutionPlan,
+  ): WorkflowSelectionContext | null {
+    const workflowStep = plan.steps.find(
+      (step) => step.type === 'workflow' && step.workflow_name,
+    );
+
+    if (!workflowStep?.workflow_name) {
+      return null;
+    }
+
+    return {
+      workflow_name: workflowStep.workflow_name,
+      workflow_vars: workflowStep.workflow_vars || {},
+    };
+  }
+
+  private describeKnownWorkflowValues(
+    workflowVars: Record<string, any>,
+    excludedKeys: string[],
+  ): string {
+    const knownValues = Object.entries(workflowVars)
+      .filter(
+        ([key, value]) =>
+          !excludedKeys.includes(key) &&
+          value !== undefined &&
+          value !== null &&
+          value !== '',
+      )
+      .map(([key, value]) => `${key}=${JSON.stringify(value)}`);
+
+    if (knownValues.length === 0) {
+      return '';
+    }
+
+    return `Known so far: ${knownValues.join(', ')}.`;
+  }
+
+  private describeWorkflowValue(value: any): string {
+    if (value === undefined) {
+      return 'undefined';
+    }
+
+    if (value === null) {
+      return 'null';
+    }
+
+    return JSON.stringify(value);
+  }
+
+  private async enrichPlanWithWorkflowDisplaySteps(
+    plan: ExecutionPlan,
+  ): Promise<ExecutionPlan> {
+    const workflowMetadataCache = new Map<string, WorkflowMetadata | null>();
+
+    const steps = await Promise.all(
+      plan.steps.map(async (step) => {
+        if (step.type !== 'workflow' || !step.workflow_name) {
+          return step;
+        }
+
+        const metadata = await this.getWorkflowMetadataForDisplay(
+          step.workflow_name,
+          workflowMetadataCache,
+        );
+
+        if (!metadata) {
+          return step;
+        }
+
+        const displaySteps =
+          metadata.user_steps && metadata.user_steps.length > 0
+            ? this.interpolateWorkflowDisplaySteps(metadata.user_steps, step.workflow_vars || {})
+            : undefined;
+
+        return {
+          ...step,
+          description: this.buildWorkflowExecutionSummary(
+            metadata.name,
+            step.workflow_vars || {},
+          ),
+          display_steps: displaySteps && displaySteps.length > 0 ? displaySteps : undefined,
+          workflow_var_definitions: this.cloneWorkflowVariableDefinitions(
+            metadata.variables,
+          ),
+        };
+      }),
+    );
+
+    return {
+      ...plan,
+      steps,
+    };
+  }
+
+  /**
+   * Interpolate workflow display steps with actual variable values
+   * @param userSteps - Original user steps from workflow metadata
+   * @param workflowVars - Actual variable values
+   * @returns Interpolated display steps
+   */
+  private interpolateWorkflowDisplaySteps(
+    userSteps: WorkflowUserStep[],
+    workflowVars: Record<string, any>,
+  ): WorkflowUserStep[] {
+    return this.sortWorkflowDisplaySteps(
+      userSteps.map((step) => ({
+        ...step,
+        title: step.titleTemplate
+          ? this.interpolateTemplate(step.titleTemplate, workflowVars)
+          : step.title,
+        description: step.descriptionTemplate
+          ? this.interpolateTemplate(step.descriptionTemplate, workflowVars)
+          : step.description,
+      })),
+    );
+  }
+
+  /**
+   * Interpolate a template string with variable values
+   * @param template - Template string with {variableName} placeholders
+   * @param vars - Variable values
+   * @returns Interpolated string
+   */
+  private interpolateTemplate(
+    template: string,
+    vars: Record<string, any>,
+  ): string {
+    return template.replace(/\{(\w+)\}/g, (match, varName) => {
+      const value = vars[varName];
+      if (value === undefined || value === null) {
+        return match; // Keep placeholder if variable not found
+      }
+      return String(value);
+    });
+  }
+
+  private async getWorkflowMetadataForDisplay(
+    workflowName: string,
+    cache: Map<string, WorkflowMetadata | null>,
+  ): Promise<WorkflowMetadata | null> {
+    if (cache.has(workflowName)) {
+      return cache.get(workflowName) ?? null;
+    }
+
+    try {
+      const metadata = await this.workflowService.readWorkflow(workflowName);
+      cache.set(workflowName, metadata);
+      return metadata;
+    } catch (error) {
+      this.logger.warn(
+        `Unable to load workflow metadata for display steps (${workflowName}): ${error.message}`,
+      );
+      cache.set(workflowName, null);
+      return null;
+    }
+  }
+
+  private cloneWorkflowVariableDefinitions(
+    variables: WorkflowVariable[],
+  ): WorkflowVariable[] {
+    return variables.map((variable) => ({ ...variable }));
+  }
+
+  private sortWorkflowDisplaySteps(
+    userSteps: WorkflowUserStep[],
+  ): WorkflowUserStep[] {
+    return userSteps
+      .map((step, originalIndex) => ({ step, originalIndex }))
+      .sort((left, right) => {
+        const leftNumber = left.step.step_number;
+        const rightNumber = right.step.step_number;
+
+        if (leftNumber !== undefined && rightNumber !== undefined) {
+          return leftNumber - rightNumber;
+        }
+
+        if (leftNumber !== undefined) {
+          return -1;
+        }
+
+        if (rightNumber !== undefined) {
+          return 1;
+        }
+
+        return left.originalIndex - right.originalIndex;
+      })
+      .map(({ step }) => step);
+  }
+
+  private buildWorkflowExecutionSummary(
+    workflowName: string,
+    workflowVars: Record<string, any> = {},
+  ): string {
+    const providedEntries = Object.entries(workflowVars).filter(
+      ([, value]) => value !== undefined && value !== null && value !== '',
+    );
+
+    if (providedEntries.length === 0) {
+      return `Run ${workflowName} workflow.`;
+    }
+
+    const renderedEntries = providedEntries.map(
+      ([key, value]) => `${key} ${this.describeWorkflowValue(value)}`,
+    );
+
+    if (renderedEntries.length === 1) {
+      return `Run ${workflowName} workflow with ${renderedEntries[0]}.`;
+    }
+
+    return `Run ${workflowName} workflow with ${this.joinDisplayNames(renderedEntries)}.`;
+  }
+
+  private joinDisplayNames(names: string[]): string {
+    if (names.length === 1) {
+      return names[0];
+    }
+
+    if (names.length === 2) {
+      return `${names[0]} and ${names[1]}`;
+    }
+
+    return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  }
+
+  private ensureSentence(text: string): string {
+    const normalizedText = text.trim();
+
+    if (!normalizedText) {
+      return 'Execute the workflow and produce the expected result.';
+    }
+
+    return /[.!?]$/.test(normalizedText)
+      ? normalizedText
+      : `${normalizedText}.`;
+  }
+
   private calculateCost(tokens: number): number {
     // Bytez Claude Opus 4.6 pricing (approximate)
     // Input: $15 per 1M tokens, Output: $75 per 1M tokens
@@ -866,5 +1792,34 @@ Respond with JSON only, following the exact schema in the system prompt.`;
     }
 
     return false;
+  }
+
+  /**
+   * Infer provider from model string for backward compatibility
+   * Used when modelConfig.provider is not available
+   */
+  private inferProviderFromModel(model: string): string {
+    // Groq models: openai/gpt-oss-*, meta-llama/llama-*
+    if (
+      model.includes('gpt-oss') || 
+      model.includes('llama-') ||
+      model.startsWith('openai/') ||
+      model.startsWith('meta-llama/')
+    ) {
+      return 'groq';
+    }
+    
+    // Google models: gemini-*
+    if (model.startsWith('gemini-') || model.includes('gemini')) {
+      return 'google';
+    }
+    
+    // OpenRouter models: typically have :free suffix or nvidia/ prefix
+    if (model.includes(':free') || model.startsWith('nvidia/')) {
+      return 'openrouter';
+    }
+    
+    // Default to Bytez for anthropic/*, qwen/*, etc.
+    return 'bytez';
   }
 }

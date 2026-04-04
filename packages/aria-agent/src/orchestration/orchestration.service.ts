@@ -1,7 +1,13 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SharedStateService } from '../shared-state/shared-state.service';
-import { ExecutionPlan } from '../agents/orchestrator/orchestrator.types';
+import { ExecutionPlan, ExecutionStep } from '../agents/orchestrator/orchestrator.types';
 import { ClarifierAgent } from '../agents/clarifier/clarifier.agent';
 import { OrchestratorAgent } from '../agents/orchestrator/orchestrator.agent';
 import { WebAgent } from '../agents/web/web.agent';
@@ -17,6 +23,11 @@ import { TaskStatus } from '@prisma/client';
 import { PinchTabService } from '../services/pinchtab.service';
 import { WorkflowService } from '../services/workflow.service';
 import { MessagesService } from '../messages/messages.service';
+import {
+  WorkflowMetadata,
+  WorkflowUserStep,
+  WorkflowVariable,
+} from '../workflows/workflow.interface';
 
 /**
  * OrchestrationService - Raw sequential pipeline for multi-agent orchestration
@@ -134,7 +145,33 @@ export class OrchestrationService {
       this.emitStatus(taskId, 'planning', 'ORCHESTRATOR');
       
       this.logger.log(`Input to Orchestrator: Clarified goal`);
-      const plan = await this.orchestrator.plan(clarified.data, taskId);
+      const planningResult = await this.orchestrator.plan(clarified.data, taskId);
+
+      if (planningResult.kind === 'needs_clarification') {
+        await this.sharedState.set(taskId, 'status', 'needs_clarification');
+        this.emitStatus(taskId, 'needs_clarification', null);
+
+        log.warn({
+          event: 'task.paused',
+          reason: 'workflow_clarification_needed',
+          question: planningResult.clarification.question?.question,
+          workflow: planningResult.workflow_context.workflow_name,
+        }, 'Task paused - workflow clarification required before approval');
+
+        this.logger.warn(
+          `[!] WORKFLOW CLARIFICATION NEEDED: ${planningResult.clarification.question?.question}`,
+        );
+        this.logger.log(`[PAUSED] Task paused - waiting for user response in chat\n`);
+
+        await this.tasksService.update(taskId, {
+          status: TaskStatus.NEEDS_HELP,
+        });
+        await this.tasksService.takeOver(taskId);
+
+        return;
+      }
+
+      const plan = planningResult.plan;
       this.logger.log(`Output from Orchestrator: Execution plan created`);
 
       if (!plan?.steps?.length) {
@@ -143,6 +180,7 @@ export class OrchestrationService {
 
       const webSteps = plan.steps.filter(s => s.type === 'web').length;
       const desktopSteps = plan.steps.filter(s => s.type === 'desktop').length;
+      const workflowSteps = plan.steps.filter(s => s.type === 'workflow').length;
       
       this.logger.log(`Plan Summary:`);
       this.logger.log(`   Total Steps: ${plan.steps.length}`);
@@ -158,6 +196,7 @@ export class OrchestrationService {
         totalSteps: plan.steps.length,
         webSteps,
         desktopSteps,
+        workflowSteps,
         steps: plan.steps.map((s, i) => ({ index: i + 1, id: s.id, type: s.type, description: s.description })),
       }, `Execution plan created with ${plan.steps.length} steps`);
 
@@ -165,13 +204,15 @@ export class OrchestrationService {
 
       // The plan message is created in orchestrator.agent.ts, no need to duplicate here
 
-      // Check if auto-approval is enabled via env variable OR if it's a simple 1-step plan
+      // Check if auto-approval is enabled via env variable OR if it's a simple 1-step non-workflow plan
       const isEnvAutoApprove = process.env.AUTO_APPROVE_PLAN === 'true';
       const isSimplePlan = plan.steps.length === 1 && plan.complexity === 'simple';
-      const autoApprovePlan = isEnvAutoApprove || isSimplePlan;
+      const hasWorkflowStep = workflowSteps > 0;
+      const autoApprovePlan =
+        isEnvAutoApprove || (isSimplePlan && !hasWorkflowStep);
       
       // DEBUG: Log the approval decision
-      this.logger.log(`\n[APPROVAL CHECK] AUTO_APPROVE_PLAN=${process.env.AUTO_APPROVE_PLAN}, isEnvAutoApprove=${isEnvAutoApprove}, steps=${plan.steps.length}, complexity=${plan.complexity}, isSimplePlan=${isSimplePlan}, autoApprovePlan=${autoApprovePlan}`);
+      this.logger.log(`\n[APPROVAL CHECK] AUTO_APPROVE_PLAN=${process.env.AUTO_APPROVE_PLAN}, isEnvAutoApprove=${isEnvAutoApprove}, steps=${plan.steps.length}, complexity=${plan.complexity}, isSimplePlan=${isSimplePlan}, hasWorkflowStep=${hasWorkflowStep}, autoApprovePlan=${autoApprovePlan}`);
       
       if (autoApprovePlan) {
         // AUTO-APPROVE: Skip user approval and proceed directly to execution
@@ -216,7 +257,15 @@ export class OrchestrationService {
 
         this.logger.log(`\n${'.'.repeat(80)}`);
         this.logger.log(`[STEP ${stepIndex + 1}/${plan.steps.length}] ${step.id}`);
-        this.logger.log(`Agent: ${step.type === 'web' ? 'WEB_AGENT' : 'DESKTOP_AGENT'}`);
+        this.logger.log(
+          `Agent: ${
+            step.type === 'workflow'
+              ? 'WORKFLOW_AGENT'
+              : step.type === 'web'
+                ? 'WEB_AGENT'
+                : 'DESKTOP_AGENT'
+          }`,
+        );
         this.logger.log(`Description: ${step.description}`);
         this.logger.log(`Success Criteria: ${step.success_criteria}`);
         if (step.context) {
@@ -493,8 +542,10 @@ this.logger.log(`   [OK] Replan successful - restarting with ${newPlan!.steps.le
     log.info({ event: 'plan.approved', stepCount: approvedPlan.length }, 'User approved plan - resuming execution');
     
     try {
+      const validatedPlan = await this.validateApprovedPlan(approvedPlan);
+
       // Update shared state with approved plan
-      await this.sharedState.set(taskId, 'execution_plan', approvedPlan);
+      await this.sharedState.set(taskId, 'execution_plan', validatedPlan);
       await this.sharedState.set(taskId, 'status', 'running');
       
       // Update task status back to IN_PROGRESS
@@ -508,7 +559,7 @@ this.logger.log(`   [OK] Replan successful - restarting with ${newPlan!.steps.le
       this.logger.log(`${'-'.repeat(80)}`);
       log.info({ event: 'phase.started', phase: 'execution' }, 'Phase 3: Execution');
       
-      const plan = { steps: approvedPlan };
+      const plan = { steps: validatedPlan };
       let stepIndex = 0;
       
       while (stepIndex < plan.steps.length) {
@@ -520,7 +571,15 @@ this.logger.log(`   [OK] Replan successful - restarting with ${newPlan!.steps.le
 
         this.logger.log(`\n${'.'.repeat(80)}`);
         this.logger.log(`[STEP ${stepIndex + 1}/${plan.steps.length}] ${step.id}`);
-        this.logger.log(`Agent: ${step.type === 'web' ? 'WEB_AGENT' : 'DESKTOP_AGENT'}`);
+        this.logger.log(
+          `Agent: ${
+            step.type === 'workflow'
+              ? 'WORKFLOW_AGENT'
+              : step.type === 'web'
+                ? 'WEB_AGENT'
+                : 'DESKTOP_AGENT'
+          }`,
+        );
         this.logger.log(`Description: ${step.description}`);
         this.logger.log(`Success Criteria: ${step.success_criteria}`);
         if (step.context) {
@@ -731,6 +790,218 @@ this.logger.log(`   [OK] Replan successful - restarting with ${newPlan!.steps.le
       await this.onFail(taskId, error as Error);
       throw error;
     }
+  }
+
+  private async validateApprovedPlan(
+    approvedPlan: any[],
+  ): Promise<ExecutionStep[]> {
+    const validatedSteps = await Promise.all(
+      approvedPlan.map(async (rawStep) => {
+        const step = rawStep as ExecutionStep;
+        if (step.type !== 'workflow' || !step.workflow_name) {
+          return step;
+        }
+
+        const metadata = await this.workflowService.readWorkflow(step.workflow_name);
+        const resolvedVars = this.applyWorkflowDefaults(
+          metadata.variables,
+          step.workflow_vars || {},
+        );
+
+        const missingVars = metadata.variables
+          .filter((variable) => variable.required)
+          .filter((variable) => !this.hasWorkflowValue(resolvedVars[variable.name]));
+
+        if (missingVars.length > 0) {
+          throw new BadRequestException(
+            `Workflow "${step.workflow_name}" is missing required input(s): ${missingVars
+              .map((variable) => variable.name)
+              .join(', ')}`,
+          );
+        }
+
+        const invalidVars = metadata.variables.filter(
+          (variable) =>
+            resolvedVars[variable.name] !== undefined &&
+            !this.isWorkflowVariableTypeValid(
+              resolvedVars[variable.name],
+              variable.type,
+            ),
+        );
+
+        if (invalidVars.length > 0) {
+          throw new BadRequestException(
+            `Workflow "${step.workflow_name}" has invalid input type(s): ${invalidVars
+              .map((variable) => `${variable.name} should be ${variable.type}`)
+              .join(', ')}`,
+          );
+        }
+
+        const displaySteps = this.resolveWorkflowDisplaySteps(
+          step,
+          metadata,
+          resolvedVars,
+        );
+
+        return {
+          ...step,
+          description: this.buildWorkflowExecutionSummary(
+            step.workflow_name,
+            resolvedVars,
+          ),
+          workflow_vars: resolvedVars,
+          display_steps:
+            displaySteps && displaySteps.length > 0 ? displaySteps : undefined,
+          workflow_var_definitions: this.cloneWorkflowVariableDefinitions(
+            metadata.variables,
+          ),
+        };
+      }),
+    );
+
+    return validatedSteps;
+  }
+
+  private applyWorkflowDefaults(
+    variables: WorkflowVariable[],
+    workflowVars: Record<string, any>,
+  ): Record<string, any> {
+    const resolvedVars = { ...(workflowVars || {}) };
+
+    variables.forEach((variable) => {
+      if (
+        !this.hasWorkflowValue(resolvedVars[variable.name]) &&
+        variable.default !== undefined
+      ) {
+        resolvedVars[variable.name] = variable.default;
+      }
+    });
+
+    return resolvedVars;
+  }
+
+  private hasWorkflowValue(value: any): boolean {
+    return value !== undefined && value !== null && value !== '';
+  }
+
+  private resolveWorkflowDisplaySteps(
+    step: ExecutionStep,
+    metadata: WorkflowMetadata,
+    workflowVars: Record<string, any>,
+  ): WorkflowUserStep[] | undefined {
+    const sourceSteps =
+      metadata.user_steps && metadata.user_steps.length > 0
+        ? metadata.user_steps
+        : step.display_steps;
+
+    if (!sourceSteps || sourceSteps.length === 0) {
+      return undefined;
+    }
+
+    return this.interpolateWorkflowDisplaySteps(sourceSteps, workflowVars);
+  }
+
+  private interpolateWorkflowDisplaySteps(
+    userSteps: WorkflowUserStep[],
+    workflowVars: Record<string, any>,
+  ): WorkflowUserStep[] {
+    return this.sortWorkflowDisplaySteps(
+      userSteps.map((step) => ({
+        ...step,
+        title: step.titleTemplate
+          ? this.interpolateTemplate(step.titleTemplate, workflowVars)
+          : step.title,
+        description: step.descriptionTemplate
+          ? this.interpolateTemplate(step.descriptionTemplate, workflowVars)
+          : step.description,
+      })),
+    );
+  }
+
+  private interpolateTemplate(
+    template: string,
+    vars: Record<string, any>,
+  ): string {
+    return template.replace(/\{(\w+)\}/g, (match, varName) => {
+      const value = vars[varName];
+      if (value === undefined || value === null) {
+        return match;
+      }
+
+      return String(value);
+    });
+  }
+
+  private cloneWorkflowVariableDefinitions(
+    variables: WorkflowVariable[],
+  ): WorkflowVariable[] {
+    return variables.map((variable) => ({ ...variable }));
+  }
+
+  private sortWorkflowDisplaySteps(
+    userSteps: WorkflowUserStep[],
+  ): WorkflowUserStep[] {
+    return userSteps
+      .map((step, originalIndex) => ({ step, originalIndex }))
+      .sort((left, right) => {
+        const leftNumber = left.step.step_number;
+        const rightNumber = right.step.step_number;
+
+        if (leftNumber !== undefined && rightNumber !== undefined) {
+          return leftNumber - rightNumber;
+        }
+
+        if (leftNumber !== undefined) {
+          return -1;
+        }
+
+        if (rightNumber !== undefined) {
+          return 1;
+        }
+
+        return left.originalIndex - right.originalIndex;
+      })
+      .map(({ step }) => step);
+  }
+
+  private isWorkflowVariableTypeValid(
+    value: any,
+    expectedType: WorkflowVariable['type'],
+  ): boolean {
+    if (value === undefined || value === null) {
+      return true;
+    }
+
+    if (expectedType === 'object') {
+      return typeof value === 'object' && !Array.isArray(value);
+    }
+
+    return typeof value === expectedType;
+  }
+
+  private buildWorkflowExecutionSummary(
+    workflowName: string,
+    workflowVars: Record<string, any>,
+  ): string {
+    const renderedEntries = Object.entries(workflowVars)
+      .filter(([, value]) => this.hasWorkflowValue(value))
+      .map(([key, value]) => `${key} ${JSON.stringify(value)}`);
+
+    if (renderedEntries.length === 0) {
+      return `Run ${workflowName} workflow.`;
+    }
+
+    if (renderedEntries.length === 1) {
+      return `Run ${workflowName} workflow with ${renderedEntries[0]}.`;
+    }
+
+    if (renderedEntries.length === 2) {
+      return `Run ${workflowName} workflow with ${renderedEntries[0]} and ${renderedEntries[1]}.`;
+    }
+
+    return `Run ${workflowName} workflow with ${renderedEntries
+      .slice(0, -1)
+      .join(', ')}, and ${renderedEntries[renderedEntries.length - 1]}.`;
   }
 
   /**

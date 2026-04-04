@@ -64,6 +64,11 @@ export class GroqService implements BytebotAgentService {
     useTools: boolean = true,
     signal?: AbortSignal,
     customTools?: any[], // Allow passing custom tools
+    options?: {
+      isFirstMessage?: boolean;      // NEW: Only send system prompt on first message
+      conversationId?: string;       // NEW: Track conversation context
+      skipSystemPrompt?: boolean;    // NEW: Explicitly skip system prompt
+    },
   ): Promise<BytebotAgentResponse> {
     if (this.mockLlmService.isMockTask(messages)) {
       return this.mockLlmService.handleMockTask(systemPrompt, messages, model);
@@ -83,12 +88,47 @@ export class GroqService implements BytebotAgentService {
         // CRITICAL: Only load tools if useTools is true
         const tools = useTools ? (customTools || groqTools) : [];
 
+        // ===== SYSTEM PROMPT OPTIMIZATION =====
+        // Only include system prompt on first message or if explicitly requested
+        const shouldIncludeSystemPrompt = options?.skipSystemPrompt === false || 
+                                          options?.isFirstMessage === true || 
+                                          options?.isFirstMessage === undefined; // Default: include (backward compatible)
+        
+        if (!shouldIncludeSystemPrompt) {
+          this.logger.log(`🚀 [OPTIMIZATION] Skipping system prompt (conversation continuation)`);
+          this.logger.log(`   Saved: ~${this.estimateTextTokens(systemPrompt)} tokens (${systemPrompt.length} chars)`);
+        }
+        // ===== END SYSTEM PROMPT OPTIMIZATION =====
+
         // ===== TOKEN COUNTING & TPM LIMIT TRACKING =====
-        const estimatedTokens = this.estimateTokenCount(systemPrompt, groqMessages, tools);
+        const estimatedTokens = shouldIncludeSystemPrompt 
+          ? this.estimateTokenCount(systemPrompt, groqMessages, tools)
+          : this.estimateTokenCount('', groqMessages, tools); // Exclude system prompt from count
         const modelLimits = this.getModelLimits(model);
         
         const contextUsagePercent = (estimatedTokens / modelLimits.contextWindow) * 100;
         const tpmUsagePercent = (estimatedTokens / modelLimits.tpmLimit) * 100;
+        
+        // ===== PRE-FLIGHT VALIDATION =====
+        // Reject requests that exceed 90% of TPM limit to prevent 413 errors
+        const TPM_SAFETY_THRESHOLD = 0.9; // 90% of limit
+        const maxSafeTokens = Math.floor(modelLimits.tpmLimit * TPM_SAFETY_THRESHOLD);
+        
+        if (estimatedTokens > maxSafeTokens) {
+          const errorMsg = `Request too large: ${estimatedTokens} tokens exceeds safe limit of ${maxSafeTokens} (90% of ${modelLimits.tpmLimit} TPM limit for ${model})`;
+          this.logger.error(`❌ PRE-FLIGHT VALIDATION FAILED: ${errorMsg}`);
+          this.logger.error(`   Estimated tokens: ${estimatedTokens}`);
+          this.logger.error(`   TPM limit: ${modelLimits.tpmLimit}`);
+          this.logger.error(`   Safe threshold (90%): ${maxSafeTokens}`);
+          this.logger.error(`   Overflow: ${estimatedTokens - maxSafeTokens} tokens`);
+          
+          // Provide actionable error message
+          throw new Error(
+            `${errorMsg}. ` +
+            `Suggestions: (1) Reduce message history, (2) Remove unnecessary tools, (3) Use a model with higher TPM limit, or (4) Split into multiple requests.`
+          );
+        }
+        // ===== END PRE-FLIGHT VALIDATION =====
         
         // Only log at INFO if approaching limits or exceeding them
         if (estimatedTokens > modelLimits.contextWindow) {
@@ -110,14 +150,18 @@ export class GroqService implements BytebotAgentService {
         this.logger.log(`Use Tools: ${useTools}`);
         this.logger.log(`Tools Count: ${tools.length}`);
         this.logger.log(`\n📊 TOKEN BREAKDOWN:`);
-        this.logger.log(`   System Prompt: ${this.estimateTextTokens(systemPrompt)} tokens (${systemPrompt.length} chars)`);
+        this.logger.log(`   System Prompt: ${shouldIncludeSystemPrompt ? this.estimateTextTokens(systemPrompt) : 0} tokens (${shouldIncludeSystemPrompt ? systemPrompt.length : 0} chars) ${!shouldIncludeSystemPrompt ? '✅ SKIPPED' : ''}`);
         this.logger.log(`   Messages: ${this.estimateMessagesTokens(groqMessages)} tokens`);
         this.logger.log(`   Tools: ${this.estimateToolsTokens(tools)} tokens`);
         this.logger.log(`   TOTAL ESTIMATED: ${estimatedTokens} tokens`);
-        this.logger.log(`\n📝 SYSTEM PROMPT (first 500 chars):`);
-        this.logger.log(systemPrompt.substring(0, 500));
-        this.logger.log(`\n📝 SYSTEM PROMPT (last 500 chars):`);
-        this.logger.log(systemPrompt.substring(Math.max(0, systemPrompt.length - 500)));
+        if (shouldIncludeSystemPrompt) {
+          this.logger.log(`\n📝 SYSTEM PROMPT (first 500 chars):`);
+          this.logger.log(systemPrompt.substring(0, 500));
+          this.logger.log(`\n📝 SYSTEM PROMPT (last 500 chars):`);
+          this.logger.log(systemPrompt.substring(Math.max(0, systemPrompt.length - 500)));
+        } else {
+          this.logger.log(`\n✅ SYSTEM PROMPT SKIPPED (conversation continuation)`);
+        }
         this.logger.log(`\n📨 USER MESSAGES (${groqMessages.length} total):`);
         groqMessages.forEach((msg, idx) => {
           const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
@@ -145,18 +189,59 @@ export class GroqService implements BytebotAgentService {
           this.logger.debug(`   Message ${idx + 1}: role=${msg.role}, content=${isArray ? 'array' : 'string'}, hasImage=${hasImage}`);
         });
 
+        // 🔍 CRITICAL DEBUG: Log the ACTUAL payload being sent to Groq
+        const actualPayload: any = {
+          model,
+          messages: shouldIncludeSystemPrompt 
+            ? [{ role: 'system', content: systemPrompt }, ...groqMessages]
+            : groqMessages,
+          tools: useTools ? tools : undefined,
+          tool_choice: useTools ? ('auto' as const) : undefined,
+          temperature: 0.7,
+          max_tokens: 8192,
+        };
+
+        // Calculate actual payload size
+        const payloadJson = JSON.stringify(actualPayload);
+        const payloadSizeKB = (payloadJson.length / 1024).toFixed(2);
+        const actualPayloadTokens = Math.ceil(payloadJson.length / 4); // Rough estimate: 1 token ≈ 4 chars
+
+        this.logger.log(`\n${'🔍'.repeat(40)}`);
+        this.logger.log(`[ACTUAL GROQ PAYLOAD DEBUG]`);
+        this.logger.log(`${'🔍'.repeat(40)}`);
+        this.logger.log(`📦 Payload Size: ${payloadSizeKB} KB (${payloadJson.length} chars)`);
+        this.logger.log(`📊 Estimated Payload Tokens: ${actualPayloadTokens}`);
+        this.logger.log(`📝 System Prompt Length: ${systemPrompt.length} chars`);
+        this.logger.log(`📨 Messages Count: ${groqMessages.length}`);
+        this.logger.log(`🔧 Tools Count: ${tools.length}`);
+        
+        // Log each message's actual size
+        groqMessages.forEach((msg, idx) => {
+          const msgJson = JSON.stringify(msg);
+          const msgSizeKB = (msgJson.length / 1024).toFixed(2);
+          this.logger.log(`   Message ${idx + 1} size: ${msgSizeKB} KB (${msgJson.length} chars)`);
+        });
+
+        // Log tools size if present
+        if (useTools && tools.length > 0) {
+          const toolsJson = JSON.stringify(tools);
+          const toolsSizeKB = (toolsJson.length / 1024).toFixed(2);
+          this.logger.log(`🔧 Tools JSON Size: ${toolsSizeKB} KB (${toolsJson.length} chars)`);
+        }
+
+        // Write full payload to a temp file for inspection
+        this.logger.log(`\n💾 Writing full payload to: /tmp/groq-payload-debug.json`);
+        try {
+          const fs = require('fs');
+          fs.writeFileSync('/tmp/groq-payload-debug.json', JSON.stringify(actualPayload, null, 2));
+          this.logger.log(`✅ Payload written successfully`);
+        } catch (err) {
+          this.logger.warn(`⚠️  Could not write payload file: ${err.message}`);
+        }
+        this.logger.log(`${'🔍'.repeat(40)}\n`);
+
         const response = await this.groq.chat.completions.create(
-          {
-            model,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              ...groqMessages,
-            ],
-            tools: useTools ? tools : undefined,
-            tool_choice: useTools ? 'auto' : undefined,
-            temperature: 0.7,
-            max_tokens: 8192,
-          },
+          actualPayload,
           { signal },
         );
 
@@ -415,10 +500,24 @@ export class GroqService implements BytebotAgentService {
   }
 
   /**
-   * Estimate token count for text using rough approximation (1 token ≈ 4 characters)
+   * Estimate token count for text using improved approximation
+   * 
+   * IMPORTANT: This is still an approximation. For 100% accuracy, use tiktoken library.
+   * 
+   * Groq's actual tokenization (based on official docs):
+   * - Base: ~1 token per 4 characters (English text)
+   * - JSON overhead: +20-30% (quotes, colons, brackets, escaping)
+   * - Tool schemas: +25-35% (complex nested structures)
+   * 
+   * The 4-char rule underestimates by 2-3x for JSON payloads.
+   * 
+   * @param text - Text to estimate tokens for
+   * @param multiplier - Overhead multiplier (1.0 = no overhead, 1.3 = +30% overhead)
+   * @returns Estimated token count
    */
-  private estimateTextTokens(text: string): number {
-    return Math.ceil(text.length / 4);
+  private estimateTextTokens(text: string, multiplier: number = 1.0): number {
+    const baseTokens = Math.ceil(text.length / 4); // 1 token ≈ 4 characters
+    return Math.ceil(baseTokens * multiplier);
   }
 
   /**
@@ -428,11 +527,13 @@ export class GroqService implements BytebotAgentService {
     let total = 0;
     for (const msg of messages) {
       if (typeof msg.content === 'string') {
-        total += this.estimateTextTokens(msg.content);
+        // Plain text messages
+        total += this.estimateTextTokens(msg.content, 1.0);
       } else if (Array.isArray(msg.content)) {
         for (const part of msg.content) {
           if (part.type === 'text') {
-            total += this.estimateTextTokens(part.text);
+            // Text content in structured messages
+            total += this.estimateTextTokens(part.text, 1.0);
           } else if (part.type === 'image_url') {
             // Images typically cost ~85-170 tokens depending on size
             total += 150; // Conservative estimate
@@ -440,33 +541,41 @@ export class GroqService implements BytebotAgentService {
         }
       }
       
-      // Tool calls add overhead
+      // Tool calls add overhead (JSON structure)
       if (msg.tool_calls) {
         for (const toolCall of msg.tool_calls) {
-          total += this.estimateTextTokens(JSON.stringify(toolCall));
+          const toolCallJson = JSON.stringify(toolCall);
+          total += this.estimateTextTokens(toolCallJson, 1.3); // +30% for JSON overhead
         }
       }
     }
-    return total;
+    
+    // Add message structure overhead (role, content wrappers)
+    const messageOverhead = Math.ceil(total * 0.15); // +15% for message structure
+    return total + messageOverhead;
   }
 
   /**
    * Estimate token count for tools definitions
+   * Tool schemas have significant JSON overhead
    */
   private estimateToolsTokens(tools: any[]): number {
+    if (!tools || tools.length === 0) return 1; // Empty tools array
+    
     const toolsJson = JSON.stringify(tools);
-    return this.estimateTextTokens(toolsJson);
+    // Tools have heavy JSON structure overhead (+30%)
+    return this.estimateTextTokens(toolsJson, 1.3);
   }
 
   /**
    * Estimate total token count for entire request
    */
   private estimateTokenCount(systemPrompt: string, messages: any[], tools: any[]): number {
-    const systemTokens = this.estimateTextTokens(systemPrompt);
+    const systemTokens = this.estimateTextTokens(systemPrompt, 1.0); // System prompt is plain text
     const messageTokens = this.estimateMessagesTokens(messages);
     const toolTokens = this.estimateToolsTokens(tools);
     
-    // Add overhead for message formatting (~10% overhead)
+    // Add overhead for request formatting (~10% overhead for top-level structure)
     const overhead = Math.ceil((systemTokens + messageTokens + toolTokens) * 0.1);
     
     return systemTokens + messageTokens + toolTokens + overhead;

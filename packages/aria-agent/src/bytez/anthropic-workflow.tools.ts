@@ -6,7 +6,7 @@
 export const anthropicWorkflowTools = [
   {
     name: 'list_workflows',
-    description: 'List all available pre-built workflows. Use this to discover what workflows exist before planning.',
+    description: 'List all available pre-built workflows with SHORT descriptions (name + 1-line summary). Returns compressed list to save tokens. Use read_workflow(name) to get full details (variables, timeout, etc) for a specific workflow. Call this FIRST to see what workflows exist, then call read_workflow for details on the one you want to use.',
     input_schema: {
       type: 'object',
       properties: {},
@@ -15,16 +15,16 @@ export const anthropicWorkflowTools = [
   },
   {
     name: 'read_workflow',
-    description: 'Read the full definition of a specific workflow by name. Use this to understand what a workflow does and what variables it needs.',
+    description: 'Get FULL details for a specific workflow including required variables, types, defaults, timeout, and version. Call this AFTER list_workflows to get complete information about a workflow before using it.',
     input_schema: {
       type: 'object',
       properties: {
-        workflow_name: {
+        name: {
           type: 'string',
-          description: 'The name of the workflow to read (e.g., "google-search", "take-screenshot")',
+          description: 'Workflow name from list_workflows (e.g., "google-search", "email-doc-deep-research")',
         },
       },
-      required: ['workflow_name'],
+      required: ['name'],
     },
   },
   {

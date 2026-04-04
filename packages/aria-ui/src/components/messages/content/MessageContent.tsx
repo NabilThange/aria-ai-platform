@@ -57,15 +57,9 @@ export function MessageContent({
     if (isToolResultContentBlock(block) && block.tool_use_id === "set_task_status") {
       return true;
     }
-    // Show tool results from important tools (list_workflows, read_workflow, etc.)
-    if (isToolResultContentBlock(block) && block.tool_use_id) {
-      const importantTools = ['list_workflows', 'read_workflow', 'use_workflow'];
-      const isImportantTool = importantTools.some(tool => block.tool_use_id?.includes(tool));
-      if (isImportantTool) {
-        return true;
-      }
-    }
-    // Hide other successful tool results (they're shown in browser_log events)
+    // REMOVED: No longer show list_workflows, read_workflow, use_workflow tool results as text
+    // They are already shown in the nice collapsible browser log components
+    // Hide all other successful tool results (they're shown in browser_log events)
     if (isToolResultContentBlock(block) && !block.is_error) {
       return false;
     }
@@ -91,21 +85,8 @@ export function MessageContent({
                   <ImageContent key={contentBlockIndex} block={contentBlock} />
                 );
               }
-              // Show text content for important tool results (list_workflows, etc.)
-              if (isTextContentBlock(contentBlock) && block.tool_use_id) {
-                const importantTools = ['list_workflows', 'read_workflow', 'use_workflow'];
-                const isImportantTool = importantTools.some(tool => block.tool_use_id?.includes(tool));
-                if (isImportantTool) {
-                  return (
-                    <div key={contentBlockIndex} className="mb-2 rounded-md border border-bytebot-bronze-light-7 bg-bytebot-red-light-1 p-3">
-                      <div className="text-xs font-semibold text-bytebot-bronze-light-12 mb-2">
-                        Tool Result: {block.tool_use_id}
-                      </div>
-                      <TextContent block={contentBlock} />
-                    </div>
-                  );
-                }
-              }
+              // REMOVED: No longer show text content for tool results
+              // They are already shown in the nice collapsible browser log components
               return null;
             })}
 
@@ -146,9 +127,16 @@ export function MessageContent({
                       body: JSON.stringify({ approvedPlan }),
                     });
                     if (!response.ok) {
-                      const errorText = await response.text();
-                      console.error('Backend returned error:', errorText);
-                      throw new Error(`Failed to approve plan: ${errorText}`);
+                      let errorMessage = "Failed to approve plan.";
+                      try {
+                        const errorPayload = await response.json();
+                        errorMessage = errorPayload?.message || errorPayload?.error || errorMessage;
+                      } catch {
+                        const errorText = await response.text();
+                        errorMessage = errorText || errorMessage;
+                      }
+                      console.error('Backend returned error:', errorMessage);
+                      throw new Error(errorMessage);
                     }
                     // Reload page to show execution
                     window.location.reload();

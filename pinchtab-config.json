@@ -1,9 +1,9 @@
 {
   "configVersion": "0.8.0",
   "server": {
-    "port": "19867",
-    "bind": "",
-    "token": "",
+    "port": "9867",
+    "bind": "0.0.0.0",
+    "token": "cd73b6999be616907696dbf01949563eb92dfe31e3a6701a",
     "stateDir": "",
     "engine": ""
   },
@@ -28,12 +28,20 @@
     "tabEvictionPolicy": ""
   },
   "security": {
-    "allowEvaluate": null,
+    "allowEvaluate": true,
     "allowMacro": null,
     "allowScreencast": null,
     "allowDownload": null,
+    "downloadAllowedDomains": [],
+    "downloadMaxBytes": 20971520,
     "allowUpload": null,
+    "allowClipboard": false,
+    "uploadMaxRequestBytes": 10485760,
+    "uploadMaxFiles": 8,
+    "uploadMaxFileBytes": 5242880,
+    "uploadMaxTotalBytes": 10485760,
     "maxRedirects": null,
+    "trustedProxyCIDRs": [],
     "attach": {
       "enabled": null,
       "allowHosts": [],
@@ -46,7 +54,8 @@
       "scanContent": false,
       "wrapContent": false,
       "customPatterns": [],
-      "scanTimeoutSec": 0
+      "scanTimeoutSec": 0,
+      "shieldThreshold": 0
     }
   },
   "profiles": {

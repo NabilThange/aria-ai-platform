@@ -317,6 +317,8 @@ export class AgentProcessor {
         model.name,
         true,
         this.abortController.signal,
+        undefined, // No custom tools
+        { isFirstMessage: true }, // NEW: Legacy agent processor always sends system prompt
       );
 
       const messageContentBlocks = agentResponse.contentBlocks;
@@ -374,6 +376,8 @@ export class AgentProcessor {
             model.name,
             false,
             this.abortController.signal,
+            undefined, // No custom tools
+            { isFirstMessage: true }, // NEW: Summarization always sends system prompt
           );
 
           const summaryContentBlocks = summaryResponse.contentBlocks;

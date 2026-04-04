@@ -49,6 +49,7 @@ export class VerifierAgent extends BaseAgent {
       });
 
       // Call Groq with strict JSON mode
+      // Verifier typically runs once per action, always send system prompt
       const response = await this.groqService.generateMessage(
         this.getSystemPrompt(),
         [
@@ -59,6 +60,9 @@ export class VerifierAgent extends BaseAgent {
         ] as any,
         this.model.model,
         false, // No tools needed
+        undefined, // No abort signal
+        undefined, // No custom tools
+        { isFirstMessage: true }, // NEW: Always send system prompt for verifier
       );
 
       // LOG AGENT RESPONSE TO BROWSER

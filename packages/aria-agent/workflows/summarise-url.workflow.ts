@@ -27,6 +27,28 @@ export const metadata: WorkflowMetadata = {
       default: 'Summarise the key points from this content in a clear, concise way.',
     },
   ],
+  user_steps: [
+    {
+      id: 'visit-url',
+      title: 'Visit URL',
+      description: 'Open the webpage in a browser and wait for it to load.',
+    },
+    {
+      id: 'extract-content',
+      title: 'Extract content',
+      description: 'Scrape all text content from the page for analysis.',
+    },
+    {
+      id: 'generate-summary',
+      title: 'Generate summary',
+      description: 'Use AI to create a concise summary of the page content.',
+    },
+    {
+      id: 'save-file',
+      title: 'Save file',
+      description: 'Write the summary to a text file on the desktop and open it.',
+    },
+  ],
 };
 
 async function callGroqAI(systemPrompt: string, userContent: string): Promise<string> {

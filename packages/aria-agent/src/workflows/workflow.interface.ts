@@ -10,9 +10,20 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 export interface WorkflowMetadata {
   name: string;
   description: string;
+  summary?: string;
   version: string;
   timeout_ms: number;
   variables: WorkflowVariable[];
+  user_steps?: WorkflowUserStep[];
+}
+
+export interface WorkflowUserStep {
+  id: string;
+  step_number?: number;
+  title: string;
+  description: string;
+  titleTemplate?: string;
+  descriptionTemplate?: string;
 }
 
 /**

@@ -39,8 +39,8 @@ const DEFAULT_AGENT_CONFIGS: AgentConfig[] = [
   },
   {
     name: "ORCHESTRATOR",
-    provider: "bytez",
-    model: "anthropic/claude-opus-4-6",
+    provider: "openrouter",
+    model: "openai/gpt-oss-120b:free",
     description: "Brain of system - bad plan = everything fails",
   },
   {
@@ -83,6 +83,7 @@ const DEFAULT_AGENT_CONFIGS: AgentConfig[] = [
 
 const GROQ_MODELS = [
   { name: "llama-3.1-8b-instant", title: "Llama 3.1 8B Instant" },
+  { name: "llama-3.3-70b-versatile", title: "Llama 3.3 70B Versatile" },
   { name: "openai/gpt-oss-120b", title: "GPT OSS 120B" },
   { name: "openai/gpt-oss-20b", title: "GPT OSS 20B" },
   { name: "meta-llama/llama-4-scout-17b-16e-instruct", title: "Llama 4 Scout 17B" },
@@ -102,6 +103,12 @@ const GOOGLE_MODELS = [
   { name: "gemini-3.1-flash-lite-preview", title: "Gemini 3.1 Flash Lite Preview" },
   { name: "gemini-2.5-flash", title: "Gemini 2.5 Flash" },
   { name: "gemini-2.5-flash-lite", title: "Gemini 2.5 Flash Lite" },
+];
+
+const OPENROUTER_MODELS = [
+  { name: "openai/gpt-oss-120b:free", title: "GPT OSS 120B (Free)" },
+  { name: "openai/gpt-oss-20b:free", title: "GPT OSS 20B (Free)" },
+  { name: "nvidia/nemotron-3-nano-30b-a3b:free", title: "Nemotron 3 Nano 30B (Free)" },
 ];
 
 export function AgentSettingsModal({ open, onOpenChange }: AgentSettingsModalProps) {
@@ -139,7 +146,8 @@ export function AgentSettingsModal({ open, onOpenChange }: AgentSettingsModalPro
           // Determine provider based on model name
           const isGroqModel = GROQ_MODELS.some((m) => m.name === newModel);
           const isGoogleModel = GOOGLE_MODELS.some((m) => m.name === newModel);
-          const provider = isGroqModel ? "groq" : isGoogleModel ? "google" : "bytez";
+          const isOpenRouterModel = OPENROUTER_MODELS.some((m) => m.name === newModel);
+          const provider = isGroqModel ? "groq" : isGoogleModel ? "google" : isOpenRouterModel ? "openrouter" : "bytez";
           
           console.log(`🎯 [FRONTEND] Model changed for ${agentName}:`, {
             oldModel: agent.model,
@@ -264,6 +272,15 @@ export function AgentSettingsModal({ open, onOpenChange }: AgentSettingsModalPro
                       GOOGLE
                     </div>
                     {GOOGLE_MODELS.map((model) => (
+                      <SelectItem key={model.name} value={model.name}>
+                        {model.title}
+                      </SelectItem>
+                    ))}
+                    <div className="my-1 border-t border-bytebot-bronze-light-7"></div>
+                    <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                      OPENROUTER (FREE)
+                    </div>
+                    {OPENROUTER_MODELS.map((model) => (
                       <SelectItem key={model.name} value={model.name}>
                         {model.title}
                       </SelectItem>

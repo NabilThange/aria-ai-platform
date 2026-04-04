@@ -17,6 +17,8 @@ services:
       - "9867:9867" # PinchTab
     environment:
       - DISPLAY=:0
+    volumes:
+      - ../pinchtab-config.json:/home/user/.pinchtab/config.json
     networks:
       - aria-network
 

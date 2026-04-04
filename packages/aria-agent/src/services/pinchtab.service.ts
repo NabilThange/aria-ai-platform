@@ -391,7 +391,8 @@ export class PinchTabService {
 
     try {
       this.logger.debug(`Executing action: ${action.kind}`);
-      const response = await this.request('POST', `/tabs/${tid}/action`, action);
+      // Use 30 second timeout for actions (typing can be slow on complex pages)
+      const response = await this.request('POST', `/tabs/${tid}/action`, action, 3, 30000);
 
       return response;
     } catch (error) {
@@ -955,7 +956,7 @@ export class PinchTabService {
 
     try {
       this.logger.debug(`Evaluating JavaScript in tab: ${tid}`);
-      const data = await this.request('POST', `/tabs/${tid}/eval`, { script });
+      const data = await this.request('POST', `/tabs/${tid}/evaluate`, { expression: script });
       
       return data.result !== undefined ? data.result : data;
     } catch (error) {

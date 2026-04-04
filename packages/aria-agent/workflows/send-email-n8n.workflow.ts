@@ -4,6 +4,7 @@ import { WorkflowLogger } from '../src/workflows/workflow-logger.helper';
 export const metadata: WorkflowMetadata = {
   name: 'send-email-n8n',
   description: 'Send email via N8N webhook using terminal curl command',
+  summary: 'Prepare an email payload, run the mail automation, and confirm the terminal response.',
   version: '1.0.0',
   timeout_ms: 50000,
   variables: [
@@ -66,6 +67,40 @@ export const metadata: WorkflowMetadata = {
       required: false,
       description: 'File path to attach (e.g., /home/user/Desktop/report.txt)',
       default: '',
+    },
+  ],
+  user_steps: [
+    {
+      id: 'prepare-email',
+      step_number: 1,
+      title: 'Prepare email',
+      description: 'Assemble the recipient, message, and optional attachment details.',
+      titleTemplate: 'Prepare email to {to}',
+      descriptionTemplate: 'Assemble message "{subject}" with recipient and attachment details',
+    },
+    {
+      id: 'open-terminal',
+      step_number: 2,
+      title: 'Open terminal',
+      description: 'Launch a terminal session and focus it for command entry.',
+      titleTemplate: 'Open terminal',
+      descriptionTemplate: 'Launch terminal session for aria-mail command',
+    },
+    {
+      id: 'run-automation',
+      step_number: 3,
+      title: 'Run automation',
+      description: 'Execute the aria-mail command that triggers the N8N email workflow.',
+      titleTemplate: 'Send email via N8N',
+      descriptionTemplate: 'Execute aria-mail to send "{subject}" to {to}',
+    },
+    {
+      id: 'confirm-response',
+      step_number: 4,
+      title: 'Confirm response',
+      description: 'Capture the terminal output and verify the send result.',
+      titleTemplate: 'Verify delivery',
+      descriptionTemplate: 'Check terminal output for successful email delivery',
     },
   ],
 };

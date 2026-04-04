@@ -195,6 +195,9 @@ export class RecoveryAgent extends BaseAgent {
       model.startsWith('openai/') ||
       model.startsWith('meta-llama/');
     
+    // Recovery agent typically runs once per failure, always send system prompt
+    const isFirstMessage = true;
+    
     if (isGroqModel) {
       this.logger.log(`🔧 Using Groq service for model: ${model}`);
       return await this.groqService.generateMessage(
@@ -202,6 +205,9 @@ export class RecoveryAgent extends BaseAgent {
         messages,
         model,
         useTools,
+        undefined, // No abort signal
+        undefined, // No custom tools
+        { isFirstMessage }, // NEW: Always send system prompt for recovery
       );
     } else {
       this.logger.log(`🔧 Using Bytez service for model: ${model}`);
@@ -210,6 +216,9 @@ export class RecoveryAgent extends BaseAgent {
         messages,
         model,
         useTools,
+        undefined, // No abort signal
+        undefined, // No custom tools
+        { isFirstMessage }, // NEW: Always send system prompt for recovery
       );
     }
   }

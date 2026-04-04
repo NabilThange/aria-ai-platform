@@ -213,4 +213,11 @@ export class BytezKeyManagerService {
   getTotalKeys(): number {
     return this.keys.length;
   }
+
+  /**
+   * Get current key index (for logging purposes)
+   */
+  getCurrentKeyIndex(): number {
+    return this.currentKeyIndex;
+  }
 }

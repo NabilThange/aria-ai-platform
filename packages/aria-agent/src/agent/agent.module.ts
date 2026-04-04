@@ -8,6 +8,7 @@ import { InputCaptureService } from './input-capture.service';
 import { GroqModule } from '../groq/groq.module';
 import { BytezModule } from '../bytez/bytez.module';
 import { GoogleModule } from '../google/google.module';
+import { OpenRouterModule } from '../openrouter/openrouter.module';
 import { SummariesModule } from 'src/summaries/summaries.modue';
 import { AgentAnalyticsService } from './agent.analytics';
 import { PinchTabService } from '../services/pinchtab.service';
@@ -25,6 +26,7 @@ import { AgentsController } from '../agents/agents.controller';
     GroqModule,
     BytezModule,
     GoogleModule,
+    OpenRouterModule,
     OrchestrationModule,
     SharedStateModule,
   ],

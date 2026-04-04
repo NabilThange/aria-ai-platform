@@ -23,6 +23,23 @@ export const metadata: WorkflowMetadata = {
       default: 2 
     },
   ],
+  user_steps: [
+    {
+      id: 'search-youtube',
+      title: 'Search YouTube',
+      description: 'Find relevant videos on YouTube matching the topic.',
+    },
+    {
+      id: 'open-videos',
+      title: 'Open videos',
+      description: 'Navigate to selected video pages without playing them.',
+    },
+    {
+      id: 'generate-summaries',
+      title: 'Generate summaries',
+      description: 'Use AI to create realistic summaries based on video titles.',
+    },
+  ],
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -206,6 +206,9 @@ export class TasksController {
       await this.tasksService.approvePlan(taskId, body.approvedPlan);
       return { success: true, message: 'Plan approved - execution resumed' };
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
       throw new HttpException(
         { success: false, message: error.message },
         HttpStatus.INTERNAL_SERVER_ERROR,

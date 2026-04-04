@@ -17,6 +17,12 @@ export interface BytebotAgentService {
     model: string,
     useTools: boolean,
     signal?: AbortSignal,
+    customTools?: any[],
+    options?: {
+      isFirstMessage?: boolean;
+      conversationId?: string;
+      skipSystemPrompt?: boolean;
+    },
   ): Promise<BytebotAgentResponse>;
 }
 

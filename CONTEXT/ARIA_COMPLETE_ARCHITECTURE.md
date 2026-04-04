@@ -1,26 +1,499 @@
 # ARIA Multi-Agent System - Complete Architecture
 
 **Generated:** March 18, 2026  
-**Last Updated:** March 31, 2026 - **Webhook-Based Workflow Completion System**
-- **Feature:** Event-driven completion detection for OpenCode workflow
-- **Problem Solved:** Eliminated slow, token-heavy AI vision polling for task completion
-- **New Architecture:**
-  - Webhook endpoint: `POST /workflows/completion/:taskId/:workflowName`
-  - Progress endpoint: `POST /workflows/progress/:taskId/:workflowName`
-  - EventEmitter2-based event system for workflow notifications
-  - OpenCode receives curl command in prompt to notify when done
-- **Files Added:**
-  - `packages/aria-agent/src/workflows/workflow-completion.controller.ts` - Webhook receiver
-  - `packages/aria-agent/workflows/helpers/webhook-completion.helper.ts` - Event-driven waiting
-- **Files Modified:**
-  - `packages/aria-agent/workflows/opencode-request.workflow.ts` - v3.0.0 with webhook support
-  - `packages/aria-agent/src/workflows/workflows.module.ts` - Added completion controller
-  - `packages/aria-agent/src/workflows/workflow.interface.ts` - Added eventEmitter to WorkflowServices
-  - `packages/aria-agent/src/services/workflow.service.ts` - Inject EventEmitter2
-- **Benefits:** Instant completion (no polling), zero token waste, exact timestamps, metadata support
-- **Fallback:** Vision detection after 6 minutes if webhook not received
+**Last Updated:** April 5, 2026 - **3-Layer Workflow Display Architecture - UI Rendering Fixes**
 
-Previous updates: March 31, 2026 - WebSocket Real-Time Messaging Fix; Agent Prompt Improvements (CLARIFIER + ORCHESTRATOR); March 26, 2026 - OpenCode Migration + Document Generation Capabilities; Phase 0 Multi-Agent Improvements  
+## Latest Update: April 5, 2026 - 3-Layer Workflow Display Architecture - UI Rendering Fixes
+
+**Problem:** The backend was correctly sending interpolated `display_steps` in the plan, but the UI wasn't showing them properly. Workflow rows were displaying "step_1" IDs and raw descriptions instead of the workflow breakdown, and empty "Success:" fields were cluttering the display.
+
+**Root Cause:** Minor rendering bugs in both `EditablePlanContent.tsx` and `AgentActionContent.tsx` that prevented the 3-layer workflow display architecture from working as designed.
+
+**3-Layer Workflow Display Architecture:**
+
+The system now implements a clean separation between execution and display:
+
+1. **Canonical Execution Layer (Backend)**
+   - Single workflow step with `type: "workflow"`, `workflow_name`, and `workflow_vars`
+   - This is what actually executes - one atomic workflow operation
+   - Stored in database and shared state
+
+2. **Template Layer (Workflow Metadata)**
+   - Workflow files define `user_steps` with `titleTemplate` and `descriptionTemplate`
+   - Templates use `{variableName}` placeholders for interpolation
+   - Example: `"Search for {maxResults} {businessType} in {city}"`
+
+3. **Display Layer (UI-Only)**
+   - Backend interpolates templates with actual variable values at plan generation time
+   - Creates `display_steps` array with resolved titles and descriptions
+   - Frontend renders these as numbered workflow breakdown
+   - Display steps are regenerated on approval if variables change
+
+**Fixes Implemented:**
+
+### 1. Fixed Workflow Row Rendering in EditablePlanContent.tsx
+- **Removed step ID display for workflow steps** (line ~207)
+  - Changed condition from `step.type !== "workflow"` to `!isWorkflow`
+  - Workflow rows now show only the workflow name chip, not "step_1"
+- **Suppressed empty "Success:" field for workflows** (line ~235)
+  - Added condition: `{step.success_criteria && !isWorkflow && ...}`
+  - Empty success criteria no longer clutter workflow display
+- **Added debug logging** to verify display_steps presence
+  - Logs: `hasDisplaySteps`, `displayStepsCount`, `workflowName`, `stepId`
+  - Helps diagnose data flow issues
+
+### 2. Fixed Workflow Row Rendering in AgentActionContent.tsx
+- **Removed step ID display for workflow steps** (line ~158)
+  - Added condition: `{step.type !== "workflow" && ...}`
+  - Mirrors EditablePlanContent behavior
+- **Suppressed empty "Success:" field for workflows** (line ~172)
+  - Already had correct condition, added debug logging
+- **Added debug logging** for workflow display steps
+  - Same logging pattern as EditablePlanContent
+
+### 3. Verified step_number Sorting
+- **Confirmed `sortWorkflowDisplaySteps()` is being called**
+  - Both components import and use the sorting function
+  - Sorts by `step_number` field when present
+  - Falls back to original array order for steps without numbers
+- **Location:** `packages/aria-ui/src/components/messages/content/workflow-plan.utils.ts`
+
+### 4. Template Interpolation Flow
+- **Plan Generation Time:**
+  - `OrchestratorAgent.enrichPlanWithWorkflowDisplaySteps()` reads workflow metadata
+  - Calls `interpolateWorkflowDisplaySteps()` with current `workflow_vars`
+  - Replaces `{variableName}` placeholders with actual values
+  - Attaches interpolated `display_steps` to plan step
+
+- **Approval Time:**
+  - User edits workflow variables in structured input fields
+  - `handleWorkflowVarChange()` updates `workflow_vars`
+  - Frontend re-interpolates display steps immediately
+  - Backend validates and regenerates on approval
+
+- **Real-Time Updates:**
+  - Editing workflow vars updates display steps in real-time
+  - No need to save/reload to see changes
+  - Approval regenerates display steps server-side for consistency
+
+**Files Modified:**
+- `packages/aria-ui/src/components/messages/content/EditablePlanContent.tsx`
+- `packages/aria-ui/src/components/messages/content/AgentActionContent.tsx`
+
+**Expected Result:**
+- Workflow rows show workflow name chip, not "step_1" ID
+- Display steps breakdown is visible and prominent
+- Empty "Success:" field is hidden for workflows
+- Editing workflow vars updates display steps in real-time
+- Debug logging helps verify data flow
+
+**Frontend Build Requirement:**
+- Changes require frontend rebuild: `cd packages/aria-ui && npm run dev`
+- Old browser cache may show stale rendering
+- Hard refresh (Ctrl+Shift+R) recommended after rebuild
+
+**Verification:**
+- Visual inspection of workflow plan cards
+- Check browser console for debug logs: `[Workflow Debug - EditablePlan]` and `[Workflow Debug - AgentAction]`
+- Verify display_steps are present and correctly interpolated
+- Test variable editing to confirm real-time display updates
+
+---
+
+## Previous Update: April 4, 2026 - Workflow-Only Plan Display
+
+**Problem:** Even when the orchestrator correctly selected a workflow, the plan card still presented the workflow parent step as if it were the main visible execution plan line. That made the UI feel like it was showing the orchestrator’s raw plan instead of the workflow’s human-friendly breakdown.
+
+**Fixes Implemented:**
+
+### 1. Workflow steps now render as workflow sections in the plan UI
+- Workflow steps still remain canonical execution steps internally (`type: "workflow"` with `workflow_name` and `workflow_vars`)
+- In both the read-only plan card and the editable approval card:
+  - the workflow name is shown as the main workflow header/chip
+  - the workflow summary sentence is no longer the primary visible plan body
+  - the visible numbered plan content comes from `display_steps` / workflow metadata `user_steps`
+- Non-workflow steps continue to render exactly as ordinary top-level execution steps
+
+### 2. Workflow display ordering now supports explicit `step_number`
+- `WorkflowUserStep.step_number` is now treated as the preferred display-order field
+- Sorting behavior:
+  - steps with `step_number` sort numerically
+  - steps without `step_number` fall back to original metadata array order
+- This ordering is now applied in:
+  - backend workflow display interpolation
+  - frontend workflow display helpers
+
+### 3. Existing workflow metadata now includes explicit step numbers
+- Added `step_number` to current workflow examples:
+  - `freelancer-research-email`
+  - `send-email-n8n`
+  - `perplexity-linkedin-post`
+- This makes workflow plan rendering stable and easier to read
+
+### 4. Multiple workflows remain queued canonically
+- No execution model change was made
+- If the orchestrator emits multiple workflow steps, they are already queued and executed sequentially in plan order
+- The UI naturally renders each workflow as its own grouped workflow section at its place in the top-level plan sequence
+- This is queueing, not time-based scheduling:
+  - sequential workflow execution is supported today
+  - delayed/scheduled workflow execution inside a single orchestration plan is not
+
+**Files Modified:**
+- `packages/aria-agent/src/agents/orchestrator/orchestrator.agent.ts`
+- `packages/aria-agent/src/orchestration/orchestration.service.ts`
+- `packages/aria-agent/workflows/freelancer-research-email.workflow.ts`
+- `packages/aria-agent/workflows/send-email-n8n.workflow.ts`
+- `packages/aria-agent/workflows/perplexity-linkedin-post.workflow.ts`
+- `packages/aria-ui/src/components/messages/content/AgentActionContent.tsx`
+- `packages/aria-ui/src/components/messages/content/EditablePlanContent.tsx`
+- `packages/aria-ui/src/components/messages/content/workflow-plan.utils.ts`
+- `packages/aria-ui/src/components/messages/content/workflow-plan.utils.test.ts`
+
+**Verification:**
+- Passed backend approval regression:
+  - `cd packages/aria-agent && npx jest orchestration.workflow-clarification.spec.ts --runInBand`
+- Passed workflow display utility tests:
+  - `cd packages/aria-ui && npx tsx --test C:\\Users\\thang\\Projects\\Aria\\Aria\\packages\\aria-ui\\src\\components\\messages\\content\\workflow-plan.utils.test.ts`
+- Passed approval-card state regression:
+  - `cd packages/aria-ui && npx tsx --test C:\\Users\\thang\\Projects\\Aria\\Aria\\packages\\aria-ui\\src\\hooks\\usePlanApprovalStatus.test.ts`
+
+## Previous Update: April 4, 2026 - Workflow Display Reliability Fixes
+
+**Problem:** The workflow display feature was mostly implemented, but it was still unreliable in 3 important ways:
+- approval-time validation preserved `workflow_vars` but dropped enriched UI-only workflow fields
+- the shared `agent_plan` payload type did not declare `workflow_var_definitions`, so the contract was incomplete
+- the task pages could hide the approval card if task status or websocket updates briefly drifted away from `awaiting_plan_approval`
+
+This made workflow breakdowns feel inconsistent after editing or approval, and it could make the approval UI disappear during status races even when shared state was still waiting for approval.
+
+**Fixes Implemented:**
+
+### 1. Approval-time workflow validation now preserves enriched workflow UI fields
+- `OrchestrationService.validateApprovedPlan(...)` now:
+  - applies defaults
+  - validates required inputs and types
+  - rebuilds the workflow summary description
+  - recomputes `display_steps` from workflow metadata `user_steps`
+  - reattaches cloned `workflow_var_definitions`
+- Result: approved workflow plans keep the same enriched display shape that the planner generated, even after variable edits and reloads
+
+### 2. Shared message content types now match the runtime workflow payload
+- `packages/shared/src/types/messageContent.types.ts` now declares:
+  - `WorkflowVariableType`
+  - `WorkflowVariableDefinition`
+  - `workflow_var_definitions?: WorkflowVariableDefinition[]` on `AgentPlanContentBlock.plan.steps`
+- Result: backend, shared types, and UI agree on the workflow plan payload contract
+
+### 3. Plan approval UI state is now more resilient to status timing drift
+- The task pages now keep checking shared state while:
+  - task status is `NEEDS_HELP`
+  - task status is `RUNNING`
+  - or local `isAwaitingPlanApproval` is already true
+- They only clear the approval UI when the task is clearly out of approval mode
+- Result: the approval card stays visible during temporary websocket/task-status transitions instead of disappearing mid-flow
+
+**Files Modified:**
+- `packages/aria-agent/src/orchestration/orchestration.service.ts`
+- `packages/aria-agent/src/orchestration/orchestration.workflow-clarification.spec.ts`
+- `packages/aria-ui/src/app/tasks/[id]/page.tsx`
+- `packages/aria-ui/src/app/control/tasks/[id]/page.tsx`
+- `packages/aria-ui/src/hooks/usePlanApprovalStatus.test.ts`
+- `packages/shared/src/types/messageContent.types.ts`
+
+**Verification:**
+- Passed backend approval regression test from the correct package:
+  - `cd packages/aria-agent && npx jest orchestration.workflow-clarification.spec.ts --runInBand`
+- Passed UI regression tests with TypeScript-aware runner:
+  - `cd packages/aria-ui && npx tsx --test C:\\Users\\thang\\Projects\\Aria\\Aria\\packages\\aria-ui\\src\\hooks\\usePlanApprovalStatus.test.ts`
+  - `cd packages/aria-ui && npx tsx --test C:\\Users\\thang\\Projects\\Aria\\Aria\\packages\\aria-ui\\src\\components\\messages\\content\\workflow-plan.utils.test.ts`
+- Important operational note:
+  - old persisted plan messages still show old content
+  - a fresh task plus backend restart is required to verify new interpolated workflow breakdowns end to end
+
+## Previous Update: April 4, 2026 - Workflow Plan Editable Inputs + Hard-Coded Display Steps
+
+**Problem:** Workflow plan approval mixed two different concepts:
+- workflow execution actually used `workflow_name` + `workflow_vars`
+- the approval UI only let users edit freeform step description text
+- workflow substeps were shown as `display_steps`, but those were informational and not tied to the editable execution inputs
+
+This meant users could rewrite the visible workflow step text, but changes like recipient emails, cities, counts, or flags were not reliably changing the workflow inputs that would actually execute.
+
+**Fixes Implemented:**
+
+### 1. Workflow steps now carry editable workflow input schema
+- `ExecutionStep` now supports `workflow_var_definitions`
+- Orchestrator workflow enrichment now attaches:
+  - `display_steps` from workflow metadata `user_steps`
+  - cloned workflow variable definitions for the UI
+  - generated workflow summary text based on current `workflow_vars`
+
+### 2. Workflow summary text is generated from workflow vars
+- Workflow parent description is now derived from the actual workflow input values instead of relying on model-authored prose
+- During both initial planning and post-clarification validation, workflow steps are rewritten to summary text like:
+  - `Run freelancer-research-email workflow with businessType "coffee shops", city "Mumbai", recipientEmail "user@example.com", and maxResults 20.`
+
+### 3. Approval-time validation now validates edited workflow vars before execution resumes
+- `OrchestrationService.approvePlan(...)` now validates approved workflow steps against workflow metadata before setting task state to running
+- Validation behavior:
+  - applies workflow defaults
+  - rejects missing required workflow vars
+  - rejects bad workflow var types
+  - rewrites workflow description from validated vars
+- Validated workflow steps are what get persisted back into shared state and then executed
+
+### 4. Plan approval API now waits for workflow validation/execution handoff errors
+- `TasksService.approvePlan(...)` now uses `eventEmitter.emitAsync(...)` for `plan.approved`
+- This allows approval-time workflow validation failures to propagate back through the API instead of returning a false success before orchestration rejects the edited plan
+- `TasksController.approvePlan(...)` now preserves existing `HttpException` status codes instead of rewrapping all approval errors as HTTP 500
+
+### 5. Workflow plan editor now uses structured inputs instead of freeform text
+- `EditablePlanContent.tsx` now treats workflow steps differently from web/desktop steps:
+  - workflow `display_steps` remain read-only and numbered in the UI
+  - workflow parent summary stays human-readable
+  - workflow edits happen through structured controls generated from `workflow_var_definitions`
+- Supported input rendering:
+  - `string` -> text input
+  - `number` -> number input
+  - `boolean` -> switch
+  - `object` -> read-only JSON display for now
+- For old persisted plans that do not contain `workflow_var_definitions`, workflow steps still render but remain read-only
+
+### 6. Approval UI now surfaces backend validation errors
+- The message content approval handler now parses backend error payloads and throws the returned validation message
+- `EditablePlanContent.tsx` keeps the approval card open and displays the returned error instead of silently failing during reload
+
+**Files Modified:**
+- `packages/aria-agent/src/agents/orchestrator/orchestrator.agent.ts`
+- `packages/aria-agent/src/agents/orchestrator/orchestrator.agent.spec.ts`
+- `packages/aria-agent/src/agents/orchestrator/orchestrator.types.ts`
+- `packages/aria-agent/src/orchestration/orchestration.service.ts`
+- `packages/aria-agent/src/orchestration/orchestration.workflow-clarification.spec.ts`
+- `packages/aria-agent/src/tasks/tasks.controller.ts`
+- `packages/aria-agent/src/tasks/tasks.service.ts`
+- `packages/aria-agent/src/workflows/workflow.interface.ts`
+- `packages/aria-ui/src/components/messages/content/EditablePlanContent.tsx`
+- `packages/aria-ui/src/components/messages/content/MessageContent.tsx`
+- `packages/aria-ui/src/components/messages/content/workflow-plan.utils.ts`
+- `packages/aria-ui/src/components/messages/content/workflow-plan.utils.test.ts`
+
+**Verification:**
+- Added and passed targeted backend tests:
+  - `packages/aria-agent/src/agents/orchestrator/orchestrator.agent.spec.ts`
+  - `packages/aria-agent/src/orchestration/orchestration.workflow-clarification.spec.ts`
+- Commands used:
+  - `node .\\node_modules\\jest\\bin\\jest.js --runTestsByPath C:\\Users\\thang\\Projects\\Aria\\Aria\\packages\\aria-agent\\src\\agents\\orchestrator\\orchestrator.agent.spec.ts --runInBand`
+  - `node .\\node_modules\\jest\\bin\\jest.js --runTestsByPath C:\\Users\\thang\\Projects\\Aria\\Aria\\packages\\aria-agent\\src\\orchestration\\orchestration.workflow-clarification.spec.ts --runInBand --testNamePattern "rejects approval|applies defaults|waits for approval|pauses before approval"`
+- `aria-ui` repo-wide `npx tsc --noEmit` still reports unrelated pre-existing type errors outside this change set
+- Sandbox process restrictions prevented direct `tsx`/esbuild execution for the new UI helper test (`spawn EPERM`), so UI verification here is code-review + integration-shape based rather than full local type/runtime clean
+
+**Expected Behavior:**
+- Workflow plans still execute as single canonical workflow steps
+- The plan UI shows hard-coded workflow steps from metadata for readability
+- User edits to workflow inputs now change `workflow_vars`, not just the visible description text
+- Approval rejects invalid workflow edits before execution starts
+- Approval errors are surfaced back into the plan card instead of looking like a successful approval
+
+---
+
+## Latest Update: April 4, 2026 - Workflow Discovery Persistence & Prompt Discipline
+
+**Problem:** Workflow planning and workflow-discovery UI were inconsistent during orchestration:
+- The orchestrator could still plan from `list_workflows()` alone and hallucinate workflow variable names without first reading workflow metadata
+- For lead-gen requests like "find 20 coffee shops in Mumbai, create an Excel file, and email it", the planner often chained `deep-research` + `opencode-request` + `send-email-n8n` instead of preferring `freelancer-research-email`
+- Important workflow discovery output (`list_workflows`, `read_workflow`, `use_workflow`) was emitted only through transient `browser.log` websocket events, so those UI blocks vanished after refresh
+
+**Root Causes:**
+1. The base orchestrator prompt required workflow exploration, but the task-specific planning prompt did not reinforce `read_workflow(name) -> use_workflow(name)` discipline or exact-variable-name reuse
+2. No task-specific hint steered local business research + spreadsheet + email requests toward `freelancer-research-email`
+3. Important workflow discovery results were not persisted as task messages, so refresh rebuilt the chat from DB and lost those blocks
+4. The UI still treated workflow discovery mostly as ephemeral browser-log state
+
+**Fixes Implemented:**
+
+### 1. Prompt discipline in task-specific planning prompt
+- `buildPlanningPrompt()` now injects a short workflow-discipline section:
+  - call `read_workflow(name)` before `use_workflow(name)`
+  - do not invent workflow variable names
+  - do not plan a workflow from `list_workflows()` alone
+- This keeps the hint close to the concrete task instead of relying only on the global system prompt
+
+### 2. Small workflow preference hint for freelancer lead-gen tasks
+- Added lightweight request detection for local-business research + spreadsheet + email tasks
+- When matched, the planning prompt now explicitly says to prefer `freelancer-research-email`
+- This is intentionally narrow so it nudges the model without overfitting unrelated tasks
+
+### 3. Persist important workflow discovery results as real task messages
+- `OrchestratorAgent.executeToolCall()` now persists `list_workflows`, `read_workflow`, and `use_workflow` results through `MessagesService.create(...)`
+- Stored content uses `ToolResult` blocks with `tool_use_id` values like:
+  - `list_workflows`
+  - `read_workflow:<name>`
+  - `use_workflow:<name>`
+- Because these are real messages, they are replayed by `/tasks/:id/messages/processed` and survive page refresh
+
+### 4. UI now avoids duplicating important workflow tools in transient browser-log state
+- `packages/aria-ui/src/hooks/useChatSession.ts` now ignores `browser.log` tool events for:
+  - `list_workflows`
+  - `read_workflow`
+  - `use_workflow`
+- The chat now relies on the persisted task-message version for those tools, which restores correctly after refresh
+
+**Files Modified:**
+- `packages/aria-agent/src/agents/orchestrator/orchestrator.agent.ts`
+- `packages/aria-agent/src/config/system-prompts.config.ts`
+- `packages/aria-agent/src/agents/orchestrator/orchestrator.agent.spec.ts`
+- `packages/aria-ui/src/hooks/useChatSession.ts`
+
+**Verification:**
+- Added and passed targeted orchestrator tests covering:
+  - planning prompt workflow-discipline hint
+  - lead-gen preference hint for `freelancer-research-email`
+  - persistence of important workflow discovery results as task messages
+- Package-local command used:
+  - `node .\\node_modules\\jest\\bin\\jest.js --runTestsByPath C:\\Users\\thang\\Projects\\Aria\\Aria\\packages\\aria-agent\\src\\agents\\orchestrator\\orchestrator.agent.spec.ts --runInBand`
+- `aria-ui` repo-wide `npx tsc --noEmit` still reports unrelated pre-existing type errors outside this change set, so UI verification for this fix is currently behavioral/runtime rather than full-project type-clean
+
+**Expected Behavior:**
+- During planning, workflow discovery results should appear as normal persisted chat content, not just temporary websocket rows
+- Refreshing the task page should keep `list_workflows` / `read_workflow` / `use_workflow` blocks visible
+- Lead-gen spreadsheet/email requests should be more likely to converge on `freelancer-research-email` instead of a brittle workflow chain
+
+---
+
+## Latest Update: April 4, 2026 - Workflow Routing Fix
+
+**Problem:** Orchestrator created workflow steps with `type: 'web'` instead of `type: 'workflow'`, causing them to be routed to WEB_AGENT instead of WORKFLOW_AGENT. This resulted in:
+- WEB_AGENT trying to execute workflow steps as browser actions
+- Infinite loops calling `pinchtab_get_snapshot` repeatedly
+- Workflows never actually executing
+
+**Root Causes:**
+1. `normalizeWorkflowIntentStep()` didn't detect workflows from description text patterns
+2. Type inference didn't recognize workflow keywords, defaulted to 'desktop'
+3. System prompt was ambiguous about tool calls vs final plan format
+
+**Fixes Implemented:**
+
+### Fix 1: Enhanced normalizeWorkflowIntentStep()
+- Added regex pattern to extract workflow name from description: `/(?:use|execute|run)\s+(?:the\s+)?([a-z0-9-]+)\s+workflow/i`
+- Added `hasWorkflowVars` check to detect workflow steps by presence of `workflow_vars` or `variables` fields
+- Workflow name resolution now checks: explicit field → description pattern → selected context
+- Added logging: `🔍 [FIX 1] Detected workflow name from description`
+
+### Fix 2: Workflow indicators in type inference
+- Added `workflowIndicators` array: `['workflow', 'execute workflow', 'run workflow', 'use workflow', ...]`
+- Workflow detection now happens BEFORE web/desktop type inference (highest priority)
+- Checks three conditions: workflow indicators in description, presence of workflow_vars, presence of workflow_name
+- Added logging: `🔍 [FIX 2] Step X inferred as 'workflow' (indicator: true, vars: true, name: true)`
+
+### Fix 3: Improved system prompt clarity
+- Added ⚠️ CRITICAL warning that `type: "workflow"` is MANDATORY for workflow steps
+- Added "TOOL CALLS vs FINAL PLAN OUTPUT" section explaining the difference
+- Added ❌ WRONG vs ✅ CORRECT examples showing tool format vs canonical step format
+- Emphasized that final JSON plan must use canonical format with `type: "workflow"`
+
+**Files Modified:**
+- `packages/aria-agent/src/agents/orchestrator/orchestrator.agent.ts` (Fixes 1-2)
+- `packages/aria-agent/src/config/system-prompts.config.ts` (Fix 3)
+
+**Expected Behavior:**
+- Orchestrator now correctly sets `type: "workflow"` for all workflow steps
+- Steps with workflow keywords route to WORKFLOW_AGENT, not WEB_AGENT
+- Clear distinction between tool calls during planning vs final plan output format
+
+**See:** `CONTEXT/WORKFLOW_ROUTING_FIX.md` for complete implementation details
+
+---
+
+**Previous Update:** April 4, 2026 - **Workflow Planning Hardening Before Approval**
+- **Feature:** Orchestrator now treats workflow selection as durable planning state and validates workflow inputs before plan approval
+- **Problem:** `use_workflow()` tool calls only informed the model, but did not guarantee the saved plan contained canonical `workflow` steps. Missing required workflow variables were also only caught later during workflow execution
+- **Root Cause:** Workflow selection lived only in tool observations unless the model re-emitted a canonical workflow step, and workflow metadata validation existed only in execution-time paths
+- **Solution:**
+  - Capture selected workflow context during orchestrator tool use and feed it into final plan normalization
+  - Normalize non-canonical workflow intent (`tool/action use_workflow`, `name + variables`, `parameters.name + parameters.variables`, selected-workflow references) into canonical `ExecutionStep` objects with `type: "workflow"`, `workflow_name`, and `workflow_vars`
+  - Validate workflow steps against `readWorkflow(...)` metadata before saving the plan or waiting for approval
+  - Pre-approval validation now checks workflow existence, required variables, metadata defaults, and variable types
+  - If required variables are missing, return a targeted clarification question and pause before approval/execution
+- **New Planning Result Contract:**
+  ```typescript
+  type OrchestratorPlanResult =
+    | { kind: 'plan'; plan: ExecutionPlan }
+    | {
+        kind: 'needs_clarification';
+        clarification: ClarifiedTask;
+        workflow_context: {
+          workflow_name: string;
+          workflow_vars: Record<string, any>;
+          missing_vars?: string[];
+        };
+      };
+  ```
+- **Execution Flow Change:**
+  1. Clarifier resolves the general request
+  2. Orchestrator discovers workflows via `list_workflows()` / `read_workflow()`
+  3. Orchestrator normalizes workflow intent into canonical workflow steps
+  4. Orchestrator validates required workflow vars against workflow metadata and defaults
+  5. If inputs are missing, orchestration pauses with `status = needs_clarification` before plan approval
+  6. If inputs are complete, the saved plan still flows through existing `display_steps` enrichment and approval UI
+- **Shared State Additions:**
+  - `workflow_selection_context` stores the previously selected workflow, known vars, and missing vars so the next planning pass can resume the same workflow after the user answers
+  - After a valid workflow plan is saved, the orchestrator now keeps the latest canonical workflow context in shared state instead of clearing it immediately, so plan edits or follow-up replanning can reuse the already validated workflow choice
+  - `pending_clarification_question` is now reused for orchestrator-generated workflow clarification questions as well as clarifier questions
+- **Prompt Update:**
+  - Orchestrator prompt still requires runtime workflow discovery
+  - Hardcoded workflow catalog was removed from the prompt section used for planning
+  - Prompt now explicitly requires canonical workflow JSON output, not just workflow tool calls
+  - Prompt now explicitly forbids returning final plan steps shaped like `{ "tool": "use_workflow", "parameters": { ... } }`; those must be converted into canonical workflow steps before the model answers
+- **Observability Improvements:**
+  - Workflow intent normalization now logs when a step is normalized to a canonical workflow step and when normalization is skipped
+  - Invalid workflow names now produce clarification instead of crashing planning
+- **Workflow Variable Merge Behavior:**
+  - Stored workflow clarification answers are treated as durable context for the same workflow
+  - Regenerated plan steps only override stored workflow vars when they provide a real value; `undefined`, `null`, and empty-string values no longer wipe out previously clarified inputs
+  - Invalid-type clarification prompts now include the current bad value so the user can correct it directly
+- **Approval Behavior Update:**
+  - Simple one-step plans are no longer auto-approved if the saved plan contains any `workflow` step
+  - This prevents canonical workflow plans from skipping the Build Plan approval gate just because they are represented as a single workflow step with metadata-driven `display_steps`
+
+Previous updates: April 2, 2026 - **PinchTab Profile Tab Cleanup Pattern**
+- **Feature:** Proper tab cleanup before stopping profile-based instances to prevent RAM buildup
+- **Problem:** When using persistent profiles with `stopInstanceByProfile()`, browser tabs persist across restarts, causing 10+ tabs to accumulate and consume excessive RAM
+- **Root Cause:** PinchTab profiles preserve ALL browser state including open tabs. Unlike non-profile instances where `stopInstance()` closes all tabs, profile-based instances keep tabs open for the next session
+- **Solution:** Manually close all tabs before stopping the instance
+- **Implementation Pattern:**
+  ```typescript
+  // 1. List all tabs in the instance
+  const tabs = await pinchTab.listTabs(instance.id);
+  
+  // 2. Close each tab individually
+  for (const tab of tabs) {
+    const tabId = tab.id || tab.tabId;
+    await fetch(`${pinchTab.baseUrl}/tabs/${tabId}/close`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${authToken}` }
+    });
+    await pinchTab.wait(500); // Prevent race conditions
+  }
+  
+  // 3. Now stop the instance (profile preserved, tabs cleared)
+  await pinchTab.stopInstanceByProfile(profileId);
+  ```
+- **Updated Workflows:**
+  - `freelancer-research-email.workflow.ts` - Added Step 8: Close all tabs before stopping
+  - `perplexity-linkedin-post.workflow.ts` - Added Step 13: Close all tabs before stopping
+  - `test-pinchtab-eval.workflow.ts` - Already implements this pattern correctly
+- **Key Insight from PinchTab Docs:**
+  - "All tabs are automatically closed when an instance is stopped" - This ONLY applies to non-profile instances
+  - For profile-based instances, tabs are part of the preserved state and must be manually closed
+  - Profiles preserve: cookies, localStorage, cache, history, AND open tabs
+- **Benefits:**
+  - Prevents RAM buildup from accumulated tabs
+  - Maintains login sessions (cookies/localStorage still preserved)
+  - Clean browser state on each workflow run
+  - Faster instance startup (no need to restore 10+ tabs)
+
+Previous updates: April 2, 2026 - Agent Prompt Refactoring (ORCHESTRATOR + CLARIFIER); April 1, 2026 - OpenRouter Provider Integration; OrchestratorAgent Provider Selection Fix; March 31, 2026 - Bytez Service API Key Rotation & Tool Configuration Fix; Webhook-Based Workflow Completion System; WebSocket Real-Time Messaging Fix; Agent Prompt Improvements (CLARIFIER + ORCHESTRATOR); March 26, 2026 - OpenCode Migration + Document Generation Capabilities; Phase 0 Multi-Agent Improvements  
 **Purpose:** Complete frontend-backend flow with exact tools, inputs, outputs, and context sources
 
 ---
@@ -437,7 +910,7 @@ for (let i = 0; i < maxWait; i++) {
 | Agent | Model | Provider | Runs | User-Selectable | Purpose |
 |-------|-------|----------|------|-----------------|---------|
 | **CLARIFIER** | openai/gpt-oss-20b | Groq | 1x | ❌ | Q&A (0-6 questions), user waiting |
-| **ORCHESTRATOR** | anthropic/claude-opus-4-6 | Bytez | 2-3x | ✅ | Planning, brain |
+| **ORCHESTRATOR** | openai/gpt-oss-120b:free | OpenRouter | 2-3x | ✅ | Planning, brain |
 | **WEB** | gemini-3-flash-preview | Google | 15-20x | ❌ | Browser automation |
 | **DESKTOP** | anthropic/claude-sonnet-4-6 | Bytez | Variable | ✅ | OS-level control |
 | **WORKFLOW** | openai/gpt-oss-20b | Groq | Per workflow step | ❌ | Pre-built workflow execution |
@@ -3948,6 +4421,107 @@ const isApiKeyError =
   errorMessage.includes('insufficient') ||
   errorMessage.includes('exceeded') ||
   errorMessage.includes('billing') ||
+  errorMessage.includes('payment');
+```
+
+#### Bytez Service Smart Error Classification (March 31, 2026)
+
+**CRITICAL FIX:** The Bytez service now implements intelligent error classification to prevent unnecessary key rotation on request format errors.
+
+**Error Types:**
+
+1. **API_KEY_ERROR** (401, 403, rate limit, quota) → Rotate key immediately
+2. **FORMAT_ERROR** (400, invalid_request_error, unexpected role) → Throw immediately, DON'T rotate
+3. **TRANSIENT_ERROR** (5xx, timeout, network) → Retry same key with backoff
+4. **UNKNOWN_ERROR** → Throw immediately
+
+**Implementation:**
+```typescript
+private classifyError(statusCode: number, errorData: any, error: Error): 
+  'API_KEY_ERROR' | 'FORMAT_ERROR' | 'TRANSIENT_ERROR' | 'UNKNOWN_ERROR' {
+  const errorStr = typeof errorData.error === 'string' 
+    ? errorData.error 
+    : JSON.stringify(errorData);
+  const errorMessage = error.message.toLowerCase();
+
+  // API_KEY_ERROR: Issues with the API key itself (rotate key)
+  if (
+    statusCode === 401 ||
+    statusCode === 403 ||
+    errorMessage.includes('rate limit') ||
+    errorMessage.includes('quota') ||
+    // ... other API key error patterns
+  ) {
+    return 'API_KEY_ERROR';
+  }
+
+  // FORMAT_ERROR: Request format issues (don't rotate, throw immediately)
+  if (
+    statusCode === 400 ||
+    errorStr.includes('invalid_request_error') ||
+    errorStr.includes('Unexpected role') ||
+    // ... other format error patterns
+  ) {
+    return 'FORMAT_ERROR';
+  }
+
+  // TRANSIENT_ERROR: Temporary issues (retry with backoff)
+  if (
+    statusCode >= 500 ||
+    errorMessage.includes('timeout') ||
+    errorMessage.includes('network') ||
+    // ... other transient error patterns
+  ) {
+    return 'TRANSIENT_ERROR';
+  }
+
+  return 'UNKNOWN_ERROR';
+}
+```
+
+**Benefits:**
+- Prevents key exhaustion from code bugs (format errors)
+- Faster failure on non-recoverable errors
+- Proper retry strategy for transient issues
+- Enhanced logging for debugging
+
+#### Anthropic Native Endpoint Tool Configuration Fix (March 31, 2026)
+
+**CRITICAL FIX:** The Bytez service was incorrectly nesting tools in a `params` object when calling Anthropic's native endpoint, causing 400 errors.
+
+**Problem:**
+```typescript
+// WRONG - Was nesting everything in params
+requestBody.params = {
+  max_tokens: 8192,
+  tools: tools,
+  tool_choice: { type: 'auto' },
+};
+```
+
+**Solution:**
+```typescript
+// CORRECT - Tools at top level for Anthropic native API
+requestBody.tools = tools;
+requestBody.tool_choice = { type: 'auto' };
+requestBody.max_tokens = 8192;
+```
+
+**Additional Fixes:**
+1. **Tool Format Validation:** Added `validateAnthropicTools()` to ensure tools have `input_schema` (not `parameters`)
+2. **System Prompt Safety:** Added check after system prompt extraction to ensure messages array isn't empty
+3. **Enhanced Logging:** Added detailed logging for error classification, key rotation reasons, and successful API calls
+
+**Files Modified:**
+- `packages/aria-agent/src/bytez/bytez.service.ts` - All 5 phases implemented
+- `packages/aria-agent/src/bytez/bytez-key-manager.service.ts` - Added `getCurrentKeyIndex()` method
+
+**Log Format:**
+```
+[ERROR] Type: FORMAT_ERROR, Status: 400, Key: 1/3, Error: ...
+[KEY ROTATION] Rotating from Key 1 due to: API_KEY_ERROR
+[SUCCESS] API call completed with Key 2
+```
   errorMessage.includes('payment');
 ```
 

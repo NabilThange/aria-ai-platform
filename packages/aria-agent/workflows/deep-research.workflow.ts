@@ -17,6 +17,8 @@ export const metadata: WorkflowMetadata = {
   name: 'deep-research',
   description:
     'Uses AI to generate multiple targeted search queries, searches each independently (Bing → Google fallback), picks the single best content-rich URL per query, scrapes each, generates a research report, saves it as a file, and optionally sends it via Gmail and/or WhatsApp.',
+  summary:
+    'Research a topic across multiple sources, synthesize the findings, and optionally deliver the report.',
   version: '2.0.0',
   timeout_ms: 240000,
   variables: [
@@ -30,6 +32,33 @@ export const metadata: WorkflowMetadata = {
     { name: 'email_button_text', type: 'string', required: false, description: 'Text for CTA button in email (optional)', default: '' },
     { name: 'email_button_url', type: 'string', required: false, description: 'URL for CTA button in email (optional)', default: '' },
     { name: 'whatsapp_to', type: 'string', required: false, description: 'Send summary to this WhatsApp number e.g. "919876543210". Leave empty to skip.' },
+  ],
+  user_steps: [
+    {
+      id: 'plan-research',
+      title: 'Plan research',
+      description: 'Generate targeted queries and decide which sources to gather.',
+    },
+    {
+      id: 'collect-sources',
+      title: 'Collect sources',
+      description: 'Search the web, select the best pages, and extract useful content.',
+    },
+    {
+      id: 'synthesize-findings',
+      title: 'Synthesize findings',
+      description: 'Combine the collected research into a structured report.',
+    },
+    {
+      id: 'save-report',
+      title: 'Save report',
+      description: 'Write the research output to a file for later use or delivery.',
+    },
+    {
+      id: 'deliver-report',
+      title: 'Deliver report',
+      description: 'Optionally send the completed report through email or WhatsApp.',
+    },
   ],
 };
 

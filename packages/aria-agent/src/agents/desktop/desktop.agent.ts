@@ -227,6 +227,10 @@ export class DesktopAgent extends BaseAgent {
       this.logger.debug(`📚 Conversation history: ${conversationMessages.length} messages`);
       this.logger.debug(`🔧 Using provider: ${isGroqModel ? 'Groq' : 'Bytez'} (model: ${model})`);
       
+      // ===== SYSTEM PROMPT OPTIMIZATION =====
+      const isFirstMessage = iteration === 1; // Only send system prompt on first iteration
+      // ===== END OPTIMIZATION =====
+      
       let response: any;
       let toolCall: DesktopToolCall | null = null;
       let responseContent = ''; // Store response content for error handling
@@ -243,6 +247,7 @@ export class DesktopAgent extends BaseAgent {
           true, // Enable tools for structured output
           undefined, // No abort signal
           groqDesktopTools, // Pass desktop-specific tools
+          { isFirstMessage }, // NEW: Optimization flag
         );
         
         const tokensUsed = response.tokenUsage?.totalTokens || 0;
@@ -302,6 +307,9 @@ export class DesktopAgent extends BaseAgent {
           conversationMessages as any,
           model,
           true, // ✅ USE TOOLS - enforces schema, prevents hallucination
+          undefined, // No abort signal
+          undefined, // Use default tools
+          { isFirstMessage }, // NEW: Optimization flag
         );
         
         const tokensUsed = response.tokenUsage?.totalTokens || 0;

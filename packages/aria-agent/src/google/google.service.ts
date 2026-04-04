@@ -92,6 +92,11 @@ export class GoogleService implements BytebotAgentService {
     useTools: boolean = true,
     signal?: AbortSignal,
     customTools?: any[],
+    options?: {
+      isFirstMessage?: boolean;      // NEW: Only send system prompt on first message
+      conversationId?: string;       // NEW: Track conversation context
+      skipSystemPrompt?: boolean;    // NEW: Explicitly skip system prompt
+    },
   ): Promise<BytebotAgentResponse> {
     const maxRetries = this.keyManager.getTotalKeys();
     let lastError: any;
@@ -100,6 +105,18 @@ export class GoogleService implements BytebotAgentService {
       try {
         // Update client with current key before each attempt
         this.updateGoogleClient();
+
+        // ===== SYSTEM PROMPT OPTIMIZATION =====
+        // Only include system prompt on first message or if explicitly requested
+        const shouldIncludeSystemPrompt = options?.skipSystemPrompt === false || 
+                                          options?.isFirstMessage === true || 
+                                          options?.isFirstMessage === undefined; // Default: include (backward compatible)
+        
+        if (!shouldIncludeSystemPrompt) {
+          this.logger.log(`🚀 [OPTIMIZATION] Skipping system prompt (conversation continuation)`);
+          this.logger.log(`   Saved: ~${Math.ceil(systemPrompt.length / 4)} tokens (${systemPrompt.length} chars)`);
+        }
+        // ===== END SYSTEM PROMPT OPTIMIZATION =====
 
         const googleMessages = this.formatMessagesForGoogle(messages);
         
@@ -118,7 +135,7 @@ export class GoogleService implements BytebotAgentService {
 
         const modelInstance = this.client.getGenerativeModel({
           model,
-          systemInstruction: systemPrompt,
+          ...(shouldIncludeSystemPrompt ? { systemInstruction: systemPrompt } : {}),
           ...(useTools ? { tools } : {}),
         });
 

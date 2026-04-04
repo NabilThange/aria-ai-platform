@@ -4,6 +4,7 @@ import { WorkflowLogger } from '../src/workflows/workflow-logger.helper';
 export const metadata: WorkflowMetadata = {
   name: 'email-doc-deep-research',
   description: 'Complete research workflow: web + YouTube + document generation + email delivery',
+  summary: 'Research a topic, generate a polished document, and email the final deliverable.',
   version: '1.0.0',
   timeout_ms: 600000, // 10 minutes total (increased to handle variable OpenCode times: 60s+200s+240s+buffer)
   variables: [
@@ -13,7 +14,29 @@ export const metadata: WorkflowMetadata = {
     { name: 'includeYouTube', type: 'boolean', required: false, default: true, description: 'Include YouTube research' },
     { name: 'maxLinks', type: 'number', required: false, default: 3, description: 'Max web sources (1-3)' },
     { name: 'maxVideos', type: 'number', required: false, default: 2, description: 'Max YouTube videos (1-3)' }
-  ]
+  ],
+  user_steps: [
+    {
+      id: 'research-topic',
+      title: 'Research topic',
+      description: 'Gather web and optional YouTube research about the requested topic.',
+    },
+    {
+      id: 'combine-insights',
+      title: 'Combine insights',
+      description: 'Summarize the collected material into a clear set of findings.',
+    },
+    {
+      id: 'generate-document',
+      title: 'Generate document',
+      description: 'Create the requested presentation or document from the research summary.',
+    },
+    {
+      id: 'email-deliverable',
+      title: 'Email deliverable',
+      description: 'Send the generated document to the requested email address.',
+    },
+  ],
 };
 
 export async function execute(variables: any, services: WorkflowServices): Promise<WorkflowResult> {

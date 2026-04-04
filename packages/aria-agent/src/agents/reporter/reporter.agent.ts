@@ -48,6 +48,7 @@ export class ReporterAgent extends BaseAgent {
       });
 
       // Call Groq for summary generation
+      // Reporter runs once per task, always send system prompt
       const response = await this.groqService.generateMessage(
         this.getSystemPrompt(),
         [
@@ -58,6 +59,9 @@ export class ReporterAgent extends BaseAgent {
         ] as any,
         this.model.model,
         false, // No tools needed
+        undefined, // No abort signal
+        undefined, // No custom tools
+        { isFirstMessage: true }, // NEW: Always send system prompt for reporter
       );
 
       // LOG AGENT RESPONSE TO BROWSER

@@ -1,0 +1,1202 @@
+import { WorkflowMetadata, WorkflowServices, WorkflowResult } from '../src/workflows/workflow.interface';
+import { WorkflowLogger } from '../src/workflows/workflow-logger.helper';
+
+export const metadata: WorkflowMetadata = {
+  name: 'perplexity-linkedin-post',
+  description: 'Research a topic on Perplexity AI, generate a LinkedIn post, and publish via N8N webhook',
+  version: '1.0.0',
+  timeout_ms: 300000, // 5 minutes - Perplexity can be slow
+  variables: [
+    {
+      name: 'topic',
+      type: 'string',
+      required: true,
+      description: 'Topic to research (e.g., "AI in healthcare", "Web3 trends")',
+    },
+  ],
+  user_steps: [
+    {
+      id: 'research-topic',
+      step_number: 1,
+      title: 'Research topic',
+      description: 'Use Perplexity AI to gather comprehensive information about the topic.',
+      titleTemplate: 'Research {topic}',
+      descriptionTemplate: 'Use Perplexity AI to gather information about {topic}',
+    },
+    {
+      id: 'generate-post',
+      step_number: 2,
+      title: 'Generate post',
+      description: 'Create a professional LinkedIn post based on the research findings.',
+      titleTemplate: 'Generate LinkedIn post',
+      descriptionTemplate: 'Create professional LinkedIn post about {topic}',
+    },
+    {
+      id: 'export-content',
+      step_number: 3,
+      title: 'Export content',
+      description: 'Extract the research and post content from Perplexity.',
+      titleTemplate: 'Export content',
+      descriptionTemplate: 'Extract research and post content from Perplexity',
+    },
+    {
+      id: 'publish-linkedin',
+      step_number: 4,
+      title: 'Publish to LinkedIn',
+      description: 'Send the generated post to LinkedIn via N8N webhook.',
+      titleTemplate: 'Publish to LinkedIn',
+      descriptionTemplate: 'Send {topic} post to LinkedIn via N8N webhook',
+    },
+  ],
+};
+
+// ── GROQ AI HELPER ────────────────────────────────────────────────────────────
+async function callGroqAI(
+  systemPrompt: string,
+  userContent: string,
+  model: string = 'llama-3.3-70b-versatile',
+): Promise<string> {
+  console.log(`🤖 Calling Groq API with model: ${model}...`);
+
+  // Try numbered keys first (GROQ_API_KEY_1, GROQ_API_KEY_2, etc.)
+  const keys: string[] = [];
+  for (let i = 1; i <= 10; i++) {
+    const k = process.env[`GROQ_API_KEY_${i}`];
+    if (k) keys.push(k);
+  }
+  
+  // Fallback to single GROQ_API_KEY
+  const bare = process.env.GROQ_API_KEY;
+  if (bare && !keys.includes(bare)) keys.push(bare);
+  
+  if (keys.length === 0) {
+    throw new Error('No Groq API key found. Set GROQ_API_KEY_1 or GROQ_API_KEY environment variable');
+  }
+
+  let lastError = new Error('Unknown');
+  for (const apiKey of keys) {
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent },
+          ],
+          temperature: 0.7,
+          max_tokens: 2048,
+        }),
+      });
+
+      const raw = await response.text();
+      const data = raw ? JSON.parse(raw) : {};
+      
+      if (response.status === 429 || response.status === 402) {
+        lastError = new Error(`Rate limited ...${apiKey.slice(-6)}`);
+        continue;
+      }
+      
+      if (!response.ok) {
+        throw new Error(`Groq API error ${response.status}: ${data?.error?.message || raw}`);
+      }
+
+      const text: string = data.choices?.[0]?.message?.content || '';
+      if (!text) throw new Error('No response from Groq API');
+
+      console.log('✅ AI response received');
+      return text;
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+  
+  throw new Error(`All Groq keys failed. Last: ${lastError.message}`);
+}
+
+// ── GROQ VISION HELPER ────────────────────────────────────────────────────────
+async function callGroqVision(
+  systemPrompt: string,
+  userPrompt: string,
+  base64Image: string,
+): Promise<string> {
+  console.log('👁️ Calling Groq Vision API...');
+
+  const keys: string[] = [];
+  for (let i = 1; i <= 10; i++) {
+    const k = process.env[`GROQ_API_KEY_${i}`];
+    if (k) keys.push(k);
+  }
+  const bare = process.env.GROQ_API_KEY;
+  if (bare && !keys.includes(bare)) keys.push(bare);
+  
+  if (keys.length === 0) {
+    throw new Error('No Groq API key found');
+  }
+
+  let lastError = new Error('Unknown');
+  for (const apiKey of keys) {
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: userPrompt },
+                { type: 'image_url', image_url: { url: `data:image/png;base64,${base64Image}` } },
+              ],
+            },
+          ],
+          temperature: 0.1,
+          max_tokens: 512,
+        }),
+      });
+
+      const raw = await response.text();
+      const data = raw ? JSON.parse(raw) : {};
+      
+      if (response.status === 429 || response.status === 402) {
+        lastError = new Error(`Rate limited ...${apiKey.slice(-6)}`);
+        continue;
+      }
+      
+      if (!response.ok) {
+        throw new Error(`Groq Vision error ${response.status}: ${data?.error?.message || raw}`);
+      }
+
+      const text: string = data.choices?.[0]?.message?.content || '';
+      if (!text) throw new Error('No response from Groq Vision');
+
+      console.log('✅ Vision response received');
+      return text;
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+  
+  throw new Error(`All Groq keys failed. Last: ${lastError.message}`);
+}
+
+// ── WAIT FOR PERPLEXITY TO LOAD ──────────────────────────────────────────────
+async function waitForPerplexityToLoad(
+  desktop: any,
+  maxAttempts: number = 10,
+): Promise<boolean> {
+  console.log('⏳ Waiting for Perplexity page to fully load...');
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await desktop.wait(3000);
+    
+    console.log(`  [${attempt}/${maxAttempts}] Checking if Perplexity is loaded...`);
+    
+    try {
+      const screenshotRaw = await desktop.screenshot();
+      
+      // Desktop returns { image: "base64...", width: number, height: number }
+      const screenshot = screenshotRaw as { image: string; width: number; height: number };
+      
+      if (!screenshot || !screenshot.image) {
+        console.warn(`  Screenshot capture failed`);
+        continue;
+      }
+      
+      const base64Image = screenshot.image;
+      console.log(`  Screenshot captured: ${base64Image.length} bytes (${screenshot.width}x${screenshot.height})`);
+      
+      if (base64Image.length < 100) {
+        console.warn(`  Screenshot data too short: ${base64Image.length} bytes`);
+        continue;
+      }
+      
+      const systemPrompt = `You are analyzing a Perplexity AI page. Determine if the page is fully loaded and ready to use.
+Look for: search box/input field visible, Perplexity branding, interactive UI elements.
+Reply with ONLY one word: LOADED or LOADING`;
+
+      const userPrompt = 'Is the Perplexity page fully loaded with the search box visible?';
+      
+      const verdict = await callGroqVision(systemPrompt, userPrompt, base64Image);
+      const status = verdict.trim().toUpperCase();
+      
+      console.log(`  Status: ${status}`);
+      
+      if (status.includes('LOADED')) {
+        console.log('✅ Perplexity page fully loaded');
+        return true;
+      }
+    } catch (error) {
+      console.warn(`  Vision check failed: ${error.message}`);
+    }
+  }
+  
+  console.log('⚠️ Max attempts reached, proceeding anyway');
+  return false;
+}
+
+// ── WAIT FOR PERPLEXITY RESPONSE ──────────────────────────────────────────────
+async function waitForPerplexityResponse(
+  desktop: any,
+  maxAttempts: number = 20,
+): Promise<boolean> {
+  console.log('⏳ Waiting for Perplexity to finish generating response...');
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await desktop.wait(5000);
+
+    console.log(`  [${attempt}/${maxAttempts}] Checking send button state...`);
+
+    try {
+      const screenshotRaw = await desktop.screenshot();
+
+      // Desktop returns { image: "base64...", width: number, height: number }
+      const screenshot = screenshotRaw as { image: string; width: number; height: number };
+
+      if (!screenshot || !screenshot.image) {
+        console.warn(`  Screenshot capture failed`);
+        continue;
+      }
+
+      const base64Image = screenshot.image;
+      console.log(`  Screenshot captured: ${base64Image.length} bytes (${screenshot.width}x${screenshot.height})`);
+
+      if (base64Image.length < 100) {
+        console.warn(`  Screenshot data too short: ${base64Image.length} bytes`);
+        continue;
+      }
+
+      const systemPrompt = `You are analyzing a Perplexity AI interface. Focus ONLY on the send button at the bottom of the screen.
+
+LOADING (Perplexity is still working):
+- Send button shows a SQUARE/STOP icon (■) inside a circle
+- Button is enabled/active
+- This means "Stop generating"
+
+DONE (Perplexity finished):
+- Send button shows an ARROW/PAPER PLANE icon (➤) inside a circle
+- Button may look slightly dull/disabled
+- This means ready to send new message
+
+Reply with ONLY one word: DONE or LOADING`;
+
+      const userPrompt = 'Look at the send button icon at the bottom. Is it a square/stop icon (LOADING) or an arrow/plane icon (DONE)?';
+
+      const verdict = await callGroqVision(systemPrompt, userPrompt, base64Image);
+      const status = verdict.trim().toUpperCase();
+
+      console.log(`  Button state: ${status}`);
+
+      if (status.includes('DONE')) {
+        console.log('✅ Perplexity response complete (arrow icon detected)');
+        console.log('⏳ Waiting 5 more seconds to ensure response is fully loaded...');
+        await desktop.wait(5000);
+        return true;
+      }
+    } catch (error) {
+      console.warn(`  Vision check failed: ${error.message}`);
+    }
+  }
+
+  console.log('⚠️ Max attempts reached, proceeding anyway');
+  return false;
+}
+
+// ── CHECK IF LOGGED IN ────────────────────────────────────────────────────────
+async function checkPerplexityLogin(desktop: any): Promise<boolean> {
+  console.log('🔍 Checking if Perplexity is logged in...');
+  
+  try {
+    const screenshotRaw = await desktop.screenshot();
+    
+    // Desktop returns { image: "base64...", width: number, height: number }
+    const screenshot = screenshotRaw as { image: string; width: number; height: number };
+    
+    if (!screenshot || !screenshot.image) {
+      console.warn(`  Screenshot capture failed, assuming logged in`);
+      return true;
+    }
+    
+    const base64Image = screenshot.image;
+    console.log(`  Screenshot captured: ${base64Image.length} bytes (${screenshot.width}x${screenshot.height})`);
+    
+    if (base64Image.length < 100) {
+      console.warn(`  Screenshot data too short (${base64Image.length} bytes), assuming logged in`);
+      return true;
+    }
+    
+    const systemPrompt = `You are analyzing a desktop screenshot showing a browser with Perplexity AI. Determine if the user is logged in or if there's a login/signup wall.
+Look for: search box (logged in) vs. login/signup buttons (not logged in).
+Reply with ONLY one word: LOGGED_IN or LOGIN_REQUIRED`;
+
+    const userPrompt = 'Is the user logged into Perplexity, or is there a login wall?';
+    
+    const verdict = await callGroqVision(systemPrompt, userPrompt, base64Image);
+    const status = verdict.trim().toUpperCase();
+    
+    console.log(`  Login status: ${status}`);
+    
+    return status.includes('LOGGED_IN');
+  } catch (error) {
+    console.warn(`  Login check failed: ${error.message}, assuming logged in`);
+    return true; // Assume logged in if check fails
+  }
+}
+
+// ── HARDCODED WEBHOOK URL ─────────────────────────────────────────────────────
+const LINKEDIN_WEBHOOK_URL = 'https://n8n-render-tpfk.onrender.com/webhook/aria-linkedin';
+
+// ── MAIN EXECUTE ──────────────────────────────────────────────────────────────
+export async function execute(
+  variables: { topic: string },
+  services: WorkflowServices,
+): Promise<WorkflowResult> {
+  const { pinchTab, desktop, browserLogger, taskId } = services;
+  const { topic } = variables;
+  const webhookUrl = LINKEDIN_WEBHOOK_URL;
+
+  const logger = new WorkflowLogger(browserLogger, taskId, 'perplexity-linkedin-post');
+  let profileId: string | undefined;
+
+  try {
+    console.log(`📝 Starting Perplexity LinkedIn post workflow for topic: "${topic}"`);
+
+    // ── STEP 1: Get or Create Persistent Profile ─────────────────────────────
+    console.log('Step 1: Setting up persistent Perplexity profile...');
+    const profiles = await logger.logToolCall('listProfiles', {}, () =>
+      pinchTab.listProfiles()
+    );
+    
+    let profile = profiles.find((p: any) => p.name === 'perplexity-profile');
+    
+    if (!profile) {
+      console.log('  Creating new profile: perplexity-profile');
+      profile = await logger.logToolCall(
+        'createProfile',
+        { name: 'perplexity-profile', description: 'Persistent Perplexity session' },
+        () => pinchTab.createProfile('perplexity-profile', 'Persistent Perplexity session')
+      );
+    } else {
+      console.log(`  Using existing profile: ${profile.id}`);
+    }
+    
+    profileId = profile.id;
+
+    // ── STEP 2: Check if Profile Already Running ─────────────────────────────
+    console.log('Step 2: Checking for existing instance...');
+    if (!profileId) throw new Error('Profile ID is undefined');
+    
+    const status = await logger.logToolCall('getProfileInstance', { profileId }, () =>
+      pinchTab.getProfileInstance(profileId!)
+    );
+    
+    if (status.running) {
+      console.log('  Stopping existing instance...');
+      await logger.logToolCall('stopInstanceByProfile', { profileId }, () =>
+        pinchTab.stopInstanceByProfile(profileId!)
+      );
+      await logger.logToolCall('wait', { duration: 2000 }, () =>
+        pinchTab.wait(2000)
+      );
+    }
+
+    // ── STEP 3: Start Instance with Profile ──────────────────────────────────
+    console.log('Step 3: Starting browser with profile...');
+    const instance = await logger.logToolCall(
+      'startInstanceWithProfile',
+      { profileId, mode: 'headed' },
+      () => pinchTab.startInstanceWithProfile(profileId!, 'headed')
+    );
+    
+    pinchTab.setCurrentInstance(instance.id);
+    console.log(`✅ Instance started: ${instance.id}`);
+    
+    // Wait longer for browser to fully initialize and auto-create first tab
+    console.log('⏳ Waiting for browser to fully initialize (10 seconds)...');
+    await logger.logToolCall('wait', { duration: 10000 }, () =>
+      pinchTab.wait(10000)
+    );
+
+    // ── STEP 4: Get or Create Tab ────────────────────────────────────────────
+    console.log('Step 4: Getting browser tab...');
+    let tabId: string | null = null;
+    
+    // First, check if a tab was auto-created when browser started
+    try {
+      const tabs = await pinchTab.listTabs(instance.id);
+      console.log(`  Found ${tabs.length} existing tabs`);
+      
+      if (tabs.length > 0) {
+        tabId = tabs[0].id || tabs[0].tabId;
+        console.log(`  Using existing tab: ${tabId}`);
+        if (tabId) {
+          await pinchTab.switchTab(tabId);
+        }
+      }
+    } catch (tabError) {
+      console.warn(`  Failed to list tabs: ${tabError.message}`);
+    }
+    
+    // If no tab exists, try to navigate (which creates a new tab)
+    if (!tabId) {
+      console.log('  No existing tab found, creating new tab...');
+      try {
+        tabId = await logger.logToolCall('navigate', { url: 'https://www.perplexity.ai' }, () =>
+          pinchTab.navigate('https://www.perplexity.ai', instance.id)
+        );
+        console.log(`  ✅ New tab created: ${tabId}`);
+      } catch (navError) {
+        console.error(`  ❌ Failed to create tab: ${navError.message}`);
+        throw new Error(`Could not create or find a browser tab. PinchTab may not be responding. Error: ${navError.message}`);
+      }
+    } else {
+      // We have a tab, now navigate it to Perplexity
+      console.log('  Navigating existing tab to Perplexity...');
+      try {
+        await logger.logToolCall('navigate', { url: 'https://www.perplexity.ai' }, () =>
+          pinchTab.navigate('https://www.perplexity.ai', instance.id)
+        );
+        console.log(`  ✅ Navigation successful`);
+      } catch (navError) {
+        console.warn(`  ⚠️ Navigation failed: ${navError.message}, continuing anyway...`);
+      }
+    }
+    
+    // Wait for page to load
+    console.log('⏳ Waiting for page to load (8 seconds)...');
+    await logger.logToolCall('wait', { duration: 8000 }, () =>
+      pinchTab.wait(8000)
+    );
+    
+    // Store the tab ID for subsequent operations
+    if (!tabId) {
+      throw new Error('Tab ID is not available after navigation');
+    }
+
+    // ── STEP 4A: Make Browser Fullscreen ─────────────────────────────────────
+    console.log('Step 4A: Making browser fullscreen...');
+    await logger.logToolCall('pressKeys', { keys: ['F11'] }, () =>
+      desktop.pressKeys(['F11'])
+    );
+    await logger.logToolCall('wait', { duration: 1000 }, () =>
+      desktop.wait(1000)
+    );
+    console.log('✅ Browser is now fullscreen');
+
+    // ── STEP 5: Wait for Perplexity to Load ──────────────────────────────────
+    console.log('Step 5: Waiting for Perplexity page to load...');
+    await waitForPerplexityToLoad(desktop, 10);
+
+    // ── STEP 6: Check Login Status ───────────────────────────────────────────
+    console.log('Step 6: Checking login status...');
+    const isLoggedIn = await checkPerplexityLogin(desktop);
+    
+    if (!isLoggedIn) {
+      console.log('❌ Perplexity login required');
+      if (profileId) {
+        await logger.logToolCall('stopInstanceByProfile', { profileId }, () =>
+          pinchTab.stopInstanceByProfile(profileId!)
+        );
+      }
+      
+      return {
+        success: false,
+        error: 'Perplexity login required',
+        message: 'Please open Perplexity in your browser and log in first, then re-run this workflow.',
+        data: { topic, loginRequired: true },
+      };
+    }
+
+    console.log('✅ Perplexity is logged in');
+
+    // ── STEP 7: Type Research Prompt ─────────────────────────────────────────
+    console.log('Step 7: Finding search box and typing research prompt...');
+    const snapshot1 = await logger.logToolCall('snapshot', { filter: 'interactive' }, () =>
+      pinchTab.snapshot('interactive')
+    );
+    
+    const elements1 = (snapshot1 as any).nodes || (snapshot1 as any).elements || [];
+    console.log(`  Found ${elements1.length} interactive elements`);
+
+    // Find search box (textbox or textarea)
+    const searchBox = elements1.find((el: any) =>
+      (el.role === 'textbox' || el.tag === 'textarea' || el.tag === 'input') &&
+      !el.attributes?.disabled
+    );
+
+    if (!searchBox) {
+      throw new Error('Could not find Perplexity search box');
+    }
+
+    console.log(`  Found search box: ref=${searchBox.ref}`);
+
+    const researchPrompt = `You are a professional content research assistant. Research the topic "${topic}" thoroughly and provide comprehensive information.
+
+RESEARCH REQUIREMENTS:
+✓ Key facts and statistics (with sources)
+✓ Latest trends and developments (2024-2026)
+✓ Expert insights and industry perspectives
+✓ Real-world examples and case studies
+✓ Actionable takeaways and implications
+
+RESEARCH QUALITY:
+- Cross-reference multiple authoritative sources
+- Prioritize recent information (last 12 months)
+- Include specific data points and metrics
+- Cite credible sources (research papers, industry reports, expert opinions)
+- Focus on practical, actionable insights
+
+STRUCTURE YOUR RESPONSE:
+1. **Overview**: Brief introduction to ${topic}
+2. **Key Facts & Statistics**: Data-driven insights with numbers
+3. **Current Trends**: What's happening now in this space
+4. **Expert Perspectives**: What thought leaders are saying
+5. **Real-World Impact**: Examples and case studies
+6. **Future Outlook**: Where this is heading
+
+**🔍 Sources:**
+[List your research sources with URLs]`;
+    
+    await logger.logToolCall('pasteText', { text: researchPrompt }, () =>
+      desktop.pasteText(researchPrompt)
+    );
+    await logger.logToolCall('wait', { duration: 1000 }, () =>
+      pinchTab.wait(1000)
+    );
+
+    // Press Enter to submit the prompt (more reliable than clicking button)
+    console.log('  Pressing Enter to submit...');
+    await logger.logToolCall('pressEnter', {}, () =>
+      desktop.pressKeys(['Return'])
+    );
+
+    // ── STEP 8: Wait for Research Response ───────────────────────────────────
+    console.log('Step 8: Waiting for Perplexity research response...');
+    await logger.logToolCall('wait', { duration: 15000 }, () =>
+      desktop.wait(15000)
+    );
+    
+    await waitForPerplexityResponse(desktop, 20);
+
+    // ── STEP 9: Type LinkedIn Post Prompt ────────────────────────────────────
+    console.log('Step 9: Requesting LinkedIn post generation...');
+    const snapshot2 = await logger.logToolCall('snapshot', { filter: 'interactive' }, () =>
+      pinchTab.snapshot('interactive')
+    );
+    
+    const elements2 = (snapshot2 as any).nodes || (snapshot2 as any).elements || [];
+
+    const searchBox2 = elements2.find((el: any) =>
+      (el.role === 'textbox' || el.tag === 'textarea' || el.tag === 'input') &&
+      !el.attributes?.disabled
+    );
+
+    if (!searchBox2) {
+      throw new Error('Could not find search box for LinkedIn post prompt');
+    }
+
+    const linkedinPrompt = `Based on your research above about "${topic}", write a professional LinkedIn post.
+
+LINKEDIN POST REQUIREMENTS:
+✓ Length: 150-200 words (engaging but concise)
+✓ Tone: Professional yet conversational
+✓ Structure:
+  - Hook: Start with a compelling question or statement
+  - Value: Share 2-3 key insights from the research
+  - Context: Explain why this matters now
+  - Call-to-action: End with engagement prompt
+✓ Hashtags: Include 3-5 relevant hashtags at the end
+✓ Formatting: Use line breaks for readability
+
+STYLE GUIDELINES:
+- Write in first person or direct address
+- Use short paragraphs (2-3 sentences max)
+- Include one emoji per section (sparingly)
+- Make it shareable and discussion-worthy
+- Avoid corporate jargon
+
+EXAMPLE STRUCTURE:
+[Hook question or bold statement]
+
+[Key insight #1 with context]
+
+[Key insight #2 with data/example]
+
+[Why this matters + future implication]
+
+[Call-to-action question]
+
+#Hashtag1 #Hashtag2 #Hashtag3`;
+    
+    await logger.logToolCall('pasteText', { text: linkedinPrompt }, () =>
+      desktop.pasteText(linkedinPrompt)
+    );
+    await logger.logToolCall('wait', { duration: 1000 }, () =>
+      pinchTab.wait(1000)
+    );
+
+    // Press Enter to submit
+    console.log('  Pressing Enter to submit...');
+    await logger.logToolCall('pressEnter', {}, () =>
+      desktop.pressKeys(['Return'])
+    );
+
+    // ── STEP 10: Wait for LinkedIn Post Response ─────────────────────────────
+    console.log('Step 10: Waiting for LinkedIn post generation...');
+    await logger.logToolCall('wait', { duration: 15000 }, () =>
+      desktop.wait(15000)
+    );
+    
+    await waitForPerplexityResponse(desktop, 20);
+
+    // ── STEP 11: Export Complete Conversation via JavaScript Eval ────────────
+    console.log('Step 11: Exporting complete conversation (research + LinkedIn post) via JavaScript eval...');
+    
+    const exportScript = `// ╔══════════════════════════════════════════════════════════════════╗
+// ║    ARIA RESEARCH — PERPLEXITY EXPORTER (Complete Edition)       ║
+// ║  Captures: Queries · Answers · Citations · Sources · Code       ║
+// ╚══════════════════════════════════════════════════════════════════╝
+(async function exportPerplexityComplete() {
+  // ── Status Display ────────────────────────────────────────────────
+  const status = document.createElement('div');
+  status.style.cssText = \`position:fixed;top:20px;right:20px;z-index:999999;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;padding:16px 24px;border-radius:12px;font:14px/1.6 'SF Mono',Monaco,monospace;box-shadow:0 8px 32px rgba(0,0,0,0.3);max-width:420px;white-space:pre-line;backdrop-filter:blur(10px);transition:all 0.3s ease;\`;
+  document.body.appendChild(status);
+  
+  const say = (msg, bg = 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)') => {
+    status.textContent = msg;
+    status.style.background = bg;
+    console.log('[Aria Export]', msg);
+  };
+  
+  const delay = ms => new Promise(r => setTimeout(r, ms));
+  
+  // ── Helpers ───────────────────────────────────────────────────────
+  function safeFilename(text) {
+    return text.replace(/[<>:"/\\\\|?*\\x00-\\x1f]/g, '_').replace(/\\s+/g, '_').replace(/_{2,}/g, '_').replace(/^_+|_+$/g, '').substring(0, 120) || 'perplexity_thread';
+  }
+  
+  function autoDownload(content, filename) {
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    // Cleanup
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+  }
+  
+  // ── Extract Thread Title ──────────────────────────────────────────
+  say('🔍 Extracting thread title...');
+  await delay(100);
+  
+  let threadTitle = 'perplexity_thread';
+  const h1 = document.querySelector('h1.group\\\\/query');
+  if (h1) {
+    threadTitle = h1.textContent.trim().substring(0, 100);
+  } else {
+    threadTitle = document.title.replace(/[-|] Perplexity.*/i, '').trim();
+  }
+  
+  // ── Find All Conversation Turns ───────────────────────────────────
+  say('🔍 Scanning conversation turns...');
+  await delay(100);
+  
+  const turns = [];
+  // Find all query elements (user prompts)
+  const queryEls = Array.from(document.querySelectorAll('h1.group\\\\/query'));
+  
+  // For each query, find its corresponding answer
+  for (const queryEl of queryEls) {
+    const turn = {
+      query: '',
+      answer: '',
+      citations: [],
+      sources: [],
+      codeBlocks: []
+    };
+    
+    // Get query text
+    turn.query = queryEl.textContent.trim();
+    
+    // Find the answer section (next sibling container with prose)
+    let answerContainer = queryEl;
+    while (answerContainer && !answerContainer.querySelector('.prose')) {
+      answerContainer = answerContainer.parentElement?.nextElementSibling;
+      if (!answerContainer || answerContainer.querySelector('h1.group\\\\/query')) break;
+    }
+    
+    if (answerContainer) {
+      // Get main prose content
+      const proseEl = answerContainer.querySelector('.prose');
+      if (proseEl) {
+        // Clone to preserve structure
+        const clone = proseEl.cloneNode(true);
+        
+        // Extract citations BEFORE removing them
+        const citationEls = clone.querySelectorAll('.citation');
+        const citationMap = new Map();
+        citationEls.forEach((cite, idx) => {
+          const link = cite.querySelector('a[href]');
+          if (link) {
+            const href = link.href;
+            const text = cite.textContent.trim();
+            const num = text.match(/\\d+/) ? text.match(/\\d+/)[0] : (idx + 1);
+            if (!citationMap.has(num)) {
+              citationMap.set(num, {
+                number: num,
+                url: href,
+                title: link.textContent.trim()
+              });
+            }
+            // Replace citation with markdown reference
+            cite.replaceWith(document.createTextNode(\`[\${num}]\`));
+          } else {
+            cite.remove();
+          }
+        });
+        turn.citations = Array.from(citationMap.values());
+        
+        // Extract code blocks
+        const codeEls = clone.querySelectorAll('pre code, code');
+        codeEls.forEach(codeEl => {
+          const pre = codeEl.closest('pre');
+          if (pre) {
+            const code = codeEl.textContent.trim();
+            if (code.length > 15) {
+              // Try to detect language
+              const classes = codeEl.className + ' ' + pre.className;
+              const langMatch = classes.match(/language-(\\w+)/);
+              const lang = langMatch ? langMatch[1] : '';
+              turn.codeBlocks.push({ lang, code });
+              // Replace with placeholder
+              pre.replaceWith(document.createTextNode(\`\\n\\n[CODE_BLOCK_\${turn.codeBlocks.length - 1}]\\n\\n\`));
+            }
+          }
+        });
+        
+        // Get clean text
+        turn.answer = clone.textContent.trim().replace(/\\n{3,}/g, '\\n\\n').replace(/\\[CODE_BLOCK_(\\d+)\\]/g, (match, idx) => {
+          const block = turn.codeBlocks[parseInt(idx)];
+          return block ? \`\\n\\\`\\\`\\\`\${block.lang}\\n\${block.code}\\n\\\`\\\`\\\`\\n\` : '';
+        });
+      }
+    }
+    
+    if (turn.query || turn.answer) {
+      turns.push(turn);
+    }
+  }
+  
+  // ── Build Markdown ────────────────────────────────────────────────
+  say('📝 Building markdown file...');
+  await delay(100);
+  
+  let md = '';
+  // Header
+  md += \`# \${threadTitle}\\n\\n\`;
+  md += \`> **Exported by Aria Research**  \\n\`;
+  md += \`> Date: \${new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}  \\n\`;
+  md += \`> Source: \${location.href}\\n\\n\`;
+  md += '---\\n\\n';
+  
+  // Conversation turns
+  for (let i = 0; i < turns.length; i++) {
+    const turn = turns[i];
+    
+    // User Query
+    if (turn.query) {
+      md += \`## 🧑 Query \${i + 1}\\n\\n\`;
+      md += \`\${turn.query}\\n\\n\`;
+    }
+    
+    // AI Answer
+    if (turn.answer) {
+      md += \`## 🤖 Answer\\n\\n\`;
+      md += \`\${turn.answer}\\n\\n\`;
+    }
+    
+    // Sources
+    if (turn.citations.length > 0) {
+      md += \`### 📚 Sources\\n\\n\`;
+      turn.citations.forEach(cite => {
+        md += \`[\${cite.number}] \${cite.title}  \\n\`;
+        md += \`<\${cite.url}>\\n\\n\`;
+      });
+    }
+    
+    md += '\\n---\\n\\n';
+  }
+  
+  // Footer
+  md += \`\\n\\n*Exported with Aria Research Perplexity Exporter*\\n\`;
+  
+  // ── Download ──────────────────────────────────────────────────────
+  say('⬇️ Downloading...');
+  await delay(200);
+  
+  const filename = \`Aria_Research_\${safeFilename(threadTitle)}.md\`;
+  autoDownload(md, filename);
+  
+  // ── Success ───────────────────────────────────────────────────────
+  say(\`✅ Export Complete!\\n\\n\` +
+      \`📊 \${turns.length} conversation turn(s)\\n\` +
+      \`📎 \${turns.reduce((a, t) => a + t.citations.length, 0)} source(s)\\n\` +
+      \`💾 \${filename}\\n\\n\` +
+      \`Check your Downloads folder!\`,
+      'linear-gradient(135deg,#11998e 0%,#38ef7d 100%)');
+  
+  setTimeout(() => status.remove(), 8000);
+  
+  return { 
+    success: true, 
+    filename, 
+    turns: turns.length,
+    citations: turns.reduce((a, t) => a + t.citations.length, 0)
+  };
+})();`;
+    
+    try {
+      const evalResult = await logger.logToolCall('evalJavaScript', { script: exportScript }, () =>
+        pinchTab.evalJavaScript(exportScript)
+      );
+      
+      console.log(`✅ JavaScript executed successfully: ${JSON.stringify(evalResult)}`);
+      
+      // Wait for download to complete
+      await logger.logToolCall('wait', { duration: 5000 }, () =>
+        pinchTab.wait(5000)
+      );
+    } catch (evalError) {
+      console.error(`❌ JavaScript eval failed: ${evalError.message}`);
+      throw new Error(`Failed to export conversation: ${evalError.message}`);
+    }
+
+    // ── STEP 12: Close All Tabs Before Stopping Instance ────────────────────
+    console.log('Step 12: Closing all tabs to prevent RAM buildup on next restart...');
+    await logger.think(`🧹 Cleaning up browser tabs...`);
+    
+    try {
+      const tabs = await logger.logToolCall('listTabs', { instanceId: instance.id }, () =>
+        pinchTab.listTabs(instance.id)
+      );
+      
+      console.log(`  Found ${tabs.length} tabs to close`);
+      
+      if (tabs.length > 0) {
+        for (let i = 0; i < tabs.length; i++) {
+          const tab = tabs[i];
+          const currentTabId = tab.id || tab.tabId;
+          
+          if (currentTabId) {
+            console.log(`  Closing tab ${i + 1}/${tabs.length}: ${currentTabId}`);
+            try {
+              await logger.logToolCall('closeTab', { tabId: currentTabId }, async () => {
+                const authToken = await pinchTab['ensureAuthToken']();
+                const response = await fetch(`${pinchTab['baseUrl']}/tabs/${currentTabId}/close`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${authToken}`,
+                  },
+                });
+                if (!response.ok) {
+                  throw new Error(`Failed to close tab: ${response.status}`);
+                }
+                return response.json();
+              });
+              
+              await logger.logToolCall('wait', { duration: 500 }, () =>
+                pinchTab.wait(500)
+              );
+            } catch (closeError) {
+              console.warn(`  Failed to close tab ${currentTabId}: ${closeError.message}`);
+            }
+          }
+        }
+        console.log('  ✅ All tabs closed');
+      } else {
+        console.log('  No tabs to close');
+      }
+    } catch (tabError) {
+      console.warn(`  Failed to list/close tabs: ${tabError.message}`);
+    }
+
+    // ── STEP 13: Stop Browser Instance ───────────────────────────────────────
+    console.log('Step 13: Stopping browser (profile preserved, tabs cleared)...');
+    if (profileId) {
+      await logger.logToolCall('stopInstanceByProfile', { profileId }, () =>
+        pinchTab.stopInstanceByProfile(profileId!)
+      );
+      
+      await logger.logToolCall('wait', { duration: 2000 }, () =>
+        pinchTab.wait(2000)
+      );
+    }
+
+    // ── STEP 14: Use OpenCode to Read File and Publish via N8N ───────────────
+    console.log('Step 14: Using OpenCode to read markdown file and publish to LinkedIn...');
+    
+    // Open terminal
+    await logger.logToolCall('launchApplication', { application: 'terminal' }, () =>
+      desktop.launchApplication('terminal')
+    );
+    await logger.logToolCall('wait', { duration: 3000 }, () =>
+      desktop.wait(3000)
+    );
+
+    // Click terminal to ensure focus
+    await logger.logToolCall('clickMouse', { coordinates: { x: 640, y: 400 }, button: 'left' }, () =>
+      desktop.clickMouse({ x: 640, y: 400 }, 'left')
+    );
+    await logger.logToolCall('wait', { duration: 500 }, () =>
+      desktop.wait(500)
+    );
+
+    // Maximize terminal (F11)
+    console.log('  Maximizing terminal to fullscreen...');
+    await logger.logToolCall('pressKeys', { keys: ['F11'] }, () =>
+      desktop.pressKeys(['F11'])
+    );
+    await logger.logToolCall('wait', { duration: 1000 }, () =>
+      desktop.wait(1000)
+    );
+
+    // Change to Desktop directory
+    console.log('  Changing to Desktop directory...');
+    await logger.logToolCall('changeDirectory', { path: '/home/user/Desktop/' }, () =>
+      desktop.typeText('cd /home/user/Desktop/', 0)
+    );
+    await logger.logToolCall('wait', { duration: 300 }, () =>
+      desktop.wait(300)
+    );
+    await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
+      desktop.pressKeys(['Return'])
+    );
+    await logger.logToolCall('wait', { duration: 500 }, () =>
+      desktop.wait(500)
+    );
+
+    // Type "opencode" command
+    console.log('  Typing "opencode" command...');
+    await logger.logToolCall('launchOpenCode', { command: 'opencode' }, () =>
+      desktop.typeText('opencode', 0)
+    );
+    await logger.logToolCall('wait', { duration: 500 }, () =>
+      desktop.wait(500)
+    );
+    await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
+      desktop.pressKeys(['Return'])
+    );
+
+    // Wait 5 seconds for initial startup
+    console.log('  Waiting for OpenCode to initialize...');
+    await logger.logToolCall('wait', { duration: 5000 }, () =>
+      desktop.wait(5000)
+    );
+
+    // Wait for OpenCode to launch using vision AI
+    console.log('  Checking if OpenCode has launched...');
+    let opencodeReady = false;
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      console.log(`    Attempt ${attempt}/10: Checking OpenCode status...`);
+      
+      const screenshot = await logger.logToolCall('screenshot', {}, () =>
+        desktop.screenshot()
+      ) as { image: string; width: number; height: number };
+
+      const systemPrompt = `You are analyzing a terminal screenshot to detect if OpenCode CLI has launched.
+
+Look for these signs that OpenCode is READY:
+- An input box or text field (often with placeholder text)
+- Mode selector options or UI elements
+- Keyboard shortcut hints at the bottom
+- The word "OpenCode" or "opencode" visible in the UI
+- Interactive interface (not just a bash prompt)
+
+Look for these signs that it's NOT ready:
+- Plain bash prompt ($ or user@hostname)
+- "command not found" error
+- Still loading or blank screen
+
+Reply with ONLY one word: READY, LOADING, or ERROR`;
+
+      const userPrompt = 'Is OpenCode fully launched and ready for input?';
+      
+      try {
+        const verdict = await callGroqVision(systemPrompt, userPrompt, screenshot.image);
+        const status = verdict.trim().toUpperCase();
+        
+        console.log(`    Status: ${status}`);
+        
+        if (status.includes('READY')) {
+          console.log('  ✅ OpenCode is ready!');
+          opencodeReady = true;
+          break;
+        } else if (status.includes('ERROR')) {
+          console.log('  ❌ OpenCode command failed!');
+          throw new Error('OpenCode command not found or failed to launch');
+        }
+      } catch (error) {
+        console.warn(`    Vision check failed: ${error.message}`);
+      }
+      
+      // Wait before next check
+      await logger.logToolCall('wait', { duration: 5000 }, () =>
+        desktop.wait(5000)
+      );
+    }
+
+    if (!opencodeReady) {
+      throw new Error('OpenCode did not launch within timeout period');
+    }
+
+    // Extra safety wait
+    await logger.logToolCall('wait', { duration: 3000 }, () =>
+      desktop.wait(3000)
+    );
+
+    // Paste OpenCode prompt using Ctrl+Shift+V
+    console.log('  Pasting OpenCode prompt with Ctrl+Shift+V...');
+    const opencodePrompt = `I need you to find and read a markdown file that was just downloaded from Perplexity, then extract the LinkedIn post and send it via webhook.
+
+STEP 1: FIND THE MARKDOWN FILE
+- Search these locations in order:
+  1. /home/user/Desktop/
+  2. /home/user/Downloads/
+- Look for the MOST RECENT .md file (created in last 5 minutes)
+- File name pattern: "Aria_Research_*.md" or contains "${topic}"
+- Use commands:
+  - ls -lt /home/user/Desktop/*.md | head -3
+  - ls -lt /home/user/Downloads/*.md | head -3
+  - find /home/user -name "*.md" -type f -mmin -5
+
+STEP 2: READ THE FILE
+- Read the entire markdown file
+- The file contains:
+  - Research query about "${topic}"
+  - Perplexity's research response
+  - LinkedIn post prompt
+  - LinkedIn post response (THIS IS WHAT WE NEED)
+
+STEP 3: EXTRACT LINKEDIN POST
+- Find the LAST "## 🤖 Answer" section (this is the LinkedIn post)
+- Extract everything from that section until the next "---" or end of file
+- The post should be 150-200 words with hashtags
+- Clean up any markdown formatting if needed
+
+STEP 4: SEND TO N8N WEBHOOK
+- Use curl to POST to: ${webhookUrl}
+- JSON format: {"post": "...", "topic": "${topic}"}
+- Command example:
+  curl -X POST "${webhookUrl}" \\
+    -H "Content-Type: application/json" \\
+    -d '{"post":"EXTRACTED_POST_HERE","topic":"${topic}"}' \\
+    && echo "LINKEDIN_SUCCESS"
+
+IMPORTANT:
+- Find the file first (don't assume location)
+- Extract ONLY the LinkedIn post (last answer section)
+- Include hashtags in the post
+- Verify curl succeeds (look for "LINKEDIN_SUCCESS")
+
+Start by finding the file!`;
+    
+    // Copy to clipboard first
+    await logger.logToolCall('pasteText', { text: opencodePrompt }, () =>
+      desktop.pasteText(opencodePrompt)
+    );
+    await logger.logToolCall('wait', { duration: 500 }, () =>
+      desktop.wait(500)
+    );
+    
+    // Use Ctrl+Shift+V to paste in terminal
+    console.log('  Pressing Ctrl+Shift+V to paste...');
+    await logger.logToolCall('pressKeys', { keys: ['Control', 'Shift', 'v'] }, () =>
+      desktop.pressKeys(['Control', 'Shift', 'v'])
+    );
+    await logger.logToolCall('wait', { duration: 1000 }, () =>
+      desktop.wait(1000)
+    );
+    
+    // Press Enter to send the prompt
+    console.log('  Pressing Enter to send prompt...');
+    await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
+      desktop.pressKeys(['Return'])
+    );
+
+    // Wait for OpenCode to process (find file, read, extract, curl)
+    console.log('  Waiting for OpenCode to process (60 seconds)...');
+    await logger.logToolCall('wait', { duration: 60000 }, () =>
+      desktop.wait(60000)
+    );
+
+    // ── STEP 15: Verify Success ──────────────────────────────────────────────
+    console.log('Step 15: Verifying OpenCode execution...');
+    const opencodeScreenshot = await logger.logToolCall('screenshot', {}, () =>
+      desktop.screenshot()
+    );
+
+    const base64Screenshot = typeof opencodeScreenshot === 'string' 
+      ? opencodeScreenshot 
+      : opencodeScreenshot.image || '';
+    
+    const verifySystemPrompt = `You are analyzing OpenCode output. Check if the workflow succeeded.
+Look for: "LINKEDIN_SUCCESS" text, successful curl response, or confirmation messages vs. error messages.
+Reply with ONLY one word: SUCCESS or ERROR`;
+
+    const verifyPrompt = 'Did OpenCode successfully find the file, extract the post, and send to webhook?';
+    
+    let webhookSuccess = false;
+    try {
+      const verdict = await callGroqVision(verifySystemPrompt, verifyPrompt, base64Screenshot);
+      webhookSuccess = verdict.trim().toUpperCase().includes('SUCCESS');
+    } catch (error) {
+      console.warn(`  Verification failed: ${error.message}`);
+    }
+
+    console.log(`  Workflow status: ${webhookSuccess ? 'SUCCESS' : 'ERROR'}`);
+
+    // ── RETURN RESULT ─────────────────────────────────────────────────────────
+    return {
+      success: webhookSuccess,
+      message: webhookSuccess
+        ? `LinkedIn post about "${topic}" published successfully via OpenCode`
+        : `Workflow completed but verification uncertain - check OpenCode screenshot`,
+      data: {
+        topic,
+        webhookSuccess,
+        opencodeScreenshot: base64Screenshot,
+      },
+    };
+
+  } catch (error) {
+    console.error(`❌ Workflow failed: ${error.message}`);
+    
+    // Clean up profile if still running
+    if (profileId) {
+      try {
+        await pinchTab.stopInstanceByProfile(profileId!);
+      } catch (_) {}
+    }
+    
+    return {
+      success: false,
+      error: error.message,
+      message: `Failed to create LinkedIn post: ${error.message}`,
+    };
+  }
+}

@@ -3,6 +3,8 @@ import { OrchestratorAgent } from './orchestrator.agent';
 import { SharedStateModule } from '../../shared-state/shared-state.module';
 import { BytezModule } from '../../bytez/bytez.module';
 import { GroqModule } from '../../groq/groq.module';
+import { GoogleModule } from '../../google/google.module';
+import { OpenRouterModule } from '../../openrouter/openrouter.module';
 import { AgentRegistryModule } from '../registry/agent-registry.module';
 import { MessagesModule } from '../../messages/messages.module';
 import { AgentModule } from '../../agent/agent.module';
@@ -15,6 +17,8 @@ import { ServicesModule } from '../../services/services.module';
     SharedStateModule,
     BytezModule,
     GroqModule,
+    GoogleModule,
+    OpenRouterModule,
     AgentRegistryModule,
     EventEmitterModule,
     ServicesModule,

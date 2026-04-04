@@ -102,6 +102,16 @@ export function useChatSession({ initialTaskId }: UseChatSessionProps = {}) {
 
       logger.debug({ event: 'browser_log.received', type: log.type }, 'Browser log event');
 
+      const importantWorkflowTools = new Set([
+        'list_workflows',
+        'read_workflow',
+        'use_workflow',
+      ]);
+      const toolName = log.data?.toolName as string | undefined;
+      if (toolName && importantWorkflowTools.has(toolName)) {
+        return;
+      }
+
       if (log.type === 'tool.call') {
         // Store tool call with pending state
         const toolCallId = `${log.data.agentName}-${log.data.toolName}-${log.timestamp}`;

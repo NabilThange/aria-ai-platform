@@ -10,11 +10,28 @@ export const workflowTools = [
     type: 'function',
     function: {
       name: 'list_workflows',
-      description: 'List all available pre-built workflows including their descriptions and required variables. Use this BEFORE creating manual steps to see if a workflow already exists for the task. Workflows are faster and more reliable than manual steps. You DO NOT need to call any other tool to understand the workflow; all necessary information is returned here.',
+      description: 'List all available pre-built workflows with SHORT descriptions (name + 1-line summary). Returns compressed list to save tokens. Use read_workflow(name) to get full details (variables, timeout, etc) for a specific workflow. Call this FIRST to see what workflows exist, then call read_workflow for details on the one you want to use.',
       parameters: {
         type: 'object',
         properties: {},
         required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_workflow',
+      description: 'Get FULL details for a specific workflow including required variables, types, defaults, timeout, and version. Call this AFTER list_workflows to get complete information about a workflow before using it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Workflow name from list_workflows (e.g., "google-search", "email-doc-deep-research")',
+          },
+        },
+        required: ['name'],
       },
     },
   },

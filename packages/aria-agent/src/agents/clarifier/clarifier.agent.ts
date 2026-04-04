@@ -69,6 +69,10 @@ export class ClarifierAgent extends BaseAgent {
       });
 
       // Call Groq for clarification
+      // ===== SYSTEM PROMPT OPTIMIZATION =====
+      // Clarifier typically runs 1-3 times per task, always send system prompt (isFirstMessage=true)
+      // since each clarification round is independent
+      // ===== END OPTIMIZATION =====
       const response = await this.groqService.generateMessage(
         systemPrompt,
         [
@@ -79,6 +83,9 @@ export class ClarifierAgent extends BaseAgent {
         ] as any,
         this.model.model,
         false, // No tools needed
+        undefined, // No abort signal
+        undefined, // No custom tools
+        { isFirstMessage: true }, // NEW: Always send system prompt for clarifier
       );
 
       // LOG AGENT RESPONSE TO BROWSER

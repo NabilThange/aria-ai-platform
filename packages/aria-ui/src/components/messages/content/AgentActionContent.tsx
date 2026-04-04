@@ -9,6 +9,7 @@ import {
   RefreshIcon,
   FileValidationIcon,
 } from "@hugeicons/core-free-icons";
+import { sortWorkflowDisplaySteps } from "./workflow-plan.utils";
 
 interface AgentThinkingProps {
   agent: string;
@@ -20,9 +21,17 @@ interface AgentPlanProps {
   plan: {
     steps: Array<{
       id: string;
-      type: "web" | "desktop";
+      type: "web" | "desktop" | "workflow";
       description: string;
       success_criteria: string;
+      workflow_name?: string;
+      workflow_vars?: Record<string, unknown>;
+      display_steps?: Array<{
+        id: string;
+        step_number?: number;
+        title: string;
+        description: string;
+      }>;
     }>;
   };
 }
@@ -140,13 +149,73 @@ export function AgentPlanContent({ agent, plan }: AgentPlanProps) {
                       <span className="inline-flex items-center rounded bg-bytebot-bronze-light-4 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-bytebot-bronze-light-11 border border-bytebot-bronze-light-6 shadow-sm">
                         {step.type}
                       </span>
-                      <span className="text-[11px] font-semibold font-mono text-bytebot-bronze-light-11 opacity-80">
-                        {step.id}
-                      </span>
+                      {step.type !== "workflow" && (
+                        <span className="text-[11px] font-semibold font-mono text-bytebot-bronze-light-11 opacity-80">
+                          {step.id}
+                        </span>
+                      )}
+                      {step.workflow_name && (
+                        <span className="inline-flex items-center rounded border border-bytebot-bronze-light-6 bg-bytebot-bronze-light-3 px-2 py-0.5 text-[10px] font-medium text-bytebot-bronze-light-11">
+                          {step.workflow_name}
+                        </span>
+                      )}
                     </div>
-                    <div className="text-[13px] font-medium leading-relaxed text-bytebot-bronze-light-12">
-                      {step.description}
-                    </div>
+                    {step.type === "workflow" ? (
+                      <div className="rounded-sm border border-bytebot-bronze-light-5 bg-bytebot-bronze-light-3/50 p-1.5 text-[11px] text-bytebot-bronze-light-11">
+                        <span className="mr-1.5 font-semibold text-bytebot-bronze-light-11 opacity-90">
+                          Workflow:
+                        </span>
+                        <span className="opacity-80">
+                          {step.workflow_name || step.id}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-[13px] font-medium leading-relaxed text-bytebot-bronze-light-12">
+                        {step.description}
+                      </div>
+                    )}
+                    {step.success_criteria && step.type !== "workflow" && (
+                      <div className="rounded-sm border border-bytebot-bronze-light-5 bg-bytebot-bronze-light-3/50 p-1.5 text-[11px] text-bytebot-bronze-light-11">
+                        <span className="mr-1.5 font-semibold text-bytebot-bronze-light-11 opacity-90">
+                          Success:
+                        </span>
+                        <span className="opacity-80">{step.success_criteria}</span>
+                      </div>
+                    )}
+                    {(() => {
+                      // Debug logging for workflow display steps
+                      if (step.type === "workflow") {
+                        console.log('[Workflow Debug - AgentAction]', {
+                          hasDisplaySteps: !!step.display_steps,
+                          displayStepsCount: step.display_steps?.length,
+                          workflowName: step.workflow_name,
+                          stepId: step.id,
+                        });
+                      }
+                      return null;
+                    })()}
+                    {step.display_steps && step.display_steps.length > 0 && (
+                      <div className="ml-1 border-l border-bytebot-bronze-light-6 pl-3 pt-1">
+                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-bytebot-bronze-light-10">
+                          Workflow Breakdown
+                        </div>
+                        <div className="space-y-2">
+                          {sortWorkflowDisplaySteps(step.display_steps).map((displayStep, displayIndex) => (
+                            <div key={displayStep.id} className="flex gap-2 text-[11px] leading-relaxed text-bytebot-bronze-light-11">
+                              <span className="w-5 flex-shrink-0 font-mono text-bytebot-bronze-light-10">
+                                {displayStep.step_number ?? displayIndex + 1}.
+                              </span>
+                              <div>
+                                <span className="font-semibold text-bytebot-bronze-light-12">
+                                  {displayStep.title}
+                                </span>
+                                <span className="ml-1">{displayStep.description}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
