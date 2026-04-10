@@ -1071,49 +1071,37 @@ Reply with ONLY one word: READY, LOADING, or ERROR`;
 
     // Paste OpenCode prompt using Ctrl+Shift+V
     console.log('  Pasting OpenCode prompt with Ctrl+Shift+V...');
-    const opencodePrompt = `I need you to find and read a markdown file that was just downloaded from Perplexity, then extract the LinkedIn post and send it via webhook.
+    const opencodePrompt = `TASK: Find and read a markdown file from Perplexity, extract the LinkedIn post, and send it via webhook.
+
+📚 FIRST: Read the skill documentation at: aria-linkedin-post/SKILL.md
+This file contains complete instructions, correct syntax, error handling, and troubleshooting.
+
+QUICK SUMMARY (full details in SKILL.md):
 
 STEP 1: FIND THE MARKDOWN FILE
-- Search these locations in order:
-  1. /home/user/Desktop/
-  2. /home/user/Downloads/
-- Look for the MOST RECENT .md file (created in last 5 minutes)
-- File name pattern: "Aria_Research_*.md" or contains "${topic}"
-- Use commands:
-  - ls -lt /home/user/Desktop/*.md | head -3
-  - ls -lt /home/user/Downloads/*.md | head -3
-  - find /home/user -name "*.md" -type f -mmin -5
+- Search: /home/user/Desktop/ or /home/user/Downloads/
+- Pattern: "Aria_Research_*.md" (created in last 5 minutes)
+- Command: find /home/user -name "Aria_Research_*.md" -type f -mmin -10
 
-STEP 2: READ THE FILE
-- Read the entire markdown file
-- The file contains:
-  - Research query about "${topic}"
-  - Perplexity's research response
-  - LinkedIn post prompt
-  - LinkedIn post response (THIS IS WHAT WE NEED)
-
-STEP 3: EXTRACT LINKEDIN POST
+STEP 2: EXTRACT LINKEDIN POST
 - Find the LAST "## 🤖 Answer" section (this is the LinkedIn post)
-- Extract everything from that section until the next "---" or end of file
-- The post should be 150-200 words with hashtags
-- Clean up any markdown formatting if needed
+- Extract until "---" or end of file
+- Keep hashtags, emojis, and line breaks
+- See SKILL.md for Python/awk/sed examples
 
-STEP 4: SEND TO N8N WEBHOOK
-- Use curl to POST to: ${webhookUrl}
-- JSON format: {"post": "...", "topic": "${topic}"}
-- Command example:
-  curl -X POST "${webhookUrl}" \\
-    -H "Content-Type: application/json" \\
-    -d '{"post":"EXTRACTED_POST_HERE","topic":"${topic}"}' \\
-    && echo "LINKEDIN_SUCCESS"
+STEP 3: SEND TO N8N WEBHOOK
+- URL: ${webhookUrl}
+- Payload: {"post": "...", "topic": "${topic}"}
+- Use jq for proper JSON escaping (see SKILL.md)
+- Verify with "LINKEDIN_SUCCESS" message
 
-IMPORTANT:
-- Find the file first (don't assume location)
-- Extract ONLY the LinkedIn post (last answer section)
-- Include hashtags in the post
-- Verify curl succeeds (look for "LINKEDIN_SUCCESS")
+⚠️ IMPORTANT:
+- Read aria-linkedin-post/SKILL.md for complete instructions
+- Use the one-liner script from SKILL.md for best results
+- Follow error handling patterns from SKILL.md
+- Topic: "${topic}"
 
-Start by finding the file!`;
+Start by reading the SKILL.md file, then execute the workflow!`;
     
     // Copy to clipboard first
     await logger.logToolCall('pasteText', { text: opencodePrompt }, () =>

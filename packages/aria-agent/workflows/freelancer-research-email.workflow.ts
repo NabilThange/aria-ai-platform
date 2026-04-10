@@ -499,7 +499,20 @@ After the complete list, add:
     console.log('Step 7A: Exporting Perplexity conversation via JavaScript eval...');
     await logger.think(`📥 Extracting conversation data from Perplexity...`);
     
-    const exportScript = `(async function exportPerplexityComplete() {
+    const exportScript = `(async function exportPerplexityV3() {
+  const status = document.createElement('div');
+  status.style.cssText = \`position: fixed;top: 50%;left: 50%;transform: translate(-50%, -50%);z-index: 999999;background: rgba(251, 249, 249, 0.98);backdrop-filter: blur(12px);border: 1px solid rgba(224, 218, 217, 1);color: rgba(45, 42, 42, 1);padding: 24px 32px;border-radius: 10px;font-family: Inter, system-ui, sans-serif;font-size: 13px;line-height: 1.6;box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08),0 4px 6px -2px rgba(0, 0, 0, 0.05);max-width: 360px;white-space: pre-line;text-align: center;transition: all 0.2s ease;\`;
+  document.body.appendChild(status);
+  
+  const say = (msg, isDone = false) => {
+    status.textContent = msg;
+    if (isDone) {
+      status.style.background = 'rgba(245, 251, 244, 0.98)';
+      status.style.borderColor = 'rgba(77, 175, 41, 0.3)';
+      status.style.color = 'rgba(43, 128, 0, 1)';
+    }
+  };
+  
   const delay = ms => new Promise(r => setTimeout(r, ms));
   
   function safeFilename(text) {
@@ -521,6 +534,7 @@ After the complete list, add:
     }, 100);
   }
   
+  say('Extracting title...');
   await delay(100);
   
   let threadTitle = 'perplexity_thread';
@@ -530,76 +544,92 @@ After the complete list, add:
   } else {
     threadTitle = document.title.replace(/[-|] Perplexity.*/i, '').trim();
   }
+  console.log('[DEBUG] Thread title:', threadTitle);
   
+  say('Scanning conversation...');
   await delay(100);
   
-  const turns = [];
-  const queryEls = Array.from(document.querySelectorAll('h1.group\\\\/query'));
+  const threadContainers = Array.from(document.querySelectorAll('.max-w-threadContentWidth'));
+  console.log('[DEBUG] Found', threadContainers.length, 'thread containers');
   
-  for (const queryEl of queryEls) {
+  const turns = [];
+  for (const container of threadContainers) {
     const turn = {
       query: '',
       answer: '',
       citations: [],
-      sources: [],
       codeBlocks: []
     };
     
-    turn.query = queryEl.textContent.trim();
-    
-    let answerContainer = queryEl;
-    while (answerContainer && !answerContainer.querySelector('.prose')) {
-      answerContainer = answerContainer.parentElement?.nextElementSibling;
-      if (!answerContainer || answerContainer.querySelector('h1.group\\\\/query')) break;
+    const queryEl = container.querySelector('h1.group\\\\/query');
+    if (queryEl) {
+      turn.query = queryEl.textContent.trim();
+      console.log('[DEBUG] Found query:', turn.query.substring(0, 50) + '...');
     }
     
-    if (answerContainer) {
-      const proseEl = answerContainer.querySelector('.prose');
-      if (proseEl) {
+    const proseEls = container.querySelectorAll('.prose');
+    console.log('[DEBUG] Found', proseEls.length, 'prose elements in container');
+    
+    if (proseEls.length > 0) {
+      let answerParts = [];
+      let allCitations = new Map();
+      let allCodeBlocks = [];
+      
+      proseEls.forEach((proseEl, idx) => {
+        console.log('[DEBUG] Processing prose element', idx, '- length:', proseEl.textContent.length);
         const clone = proseEl.cloneNode(true);
         
         const citationEls = clone.querySelectorAll('.citation');
-        const citationMap = new Map();
-        citationEls.forEach((cite, idx) => {
+        citationEls.forEach((cite) => {
           const link = cite.querySelector('a[href]');
           if (link) {
             const href = link.href;
             const text = cite.textContent.trim();
-            const num = text.match(/\\d+/) ? text.match(/\\d+/)[0] : (idx + 1);
-            if (!citationMap.has(num)) {
-              citationMap.set(num, {
+            const num = text.match(/\\d+/)?.[0] || allCitations.size + 1;
+            if (!allCitations.has(num)) {
+              allCitations.set(num, {
                 number: num,
                 url: href,
-                title: link.textContent.trim()
+                title: link.textContent.trim() || link.getAttribute('aria-label') || \`Source \${num}\`
               });
             }
-            cite.replaceWith(document.createTextNode(\`[\${num}]\`));
+            cite.replaceWith(document.createTextNode(\` [\${num}] \`));
           } else {
             cite.remove();
           }
         });
-        turn.citations = Array.from(citationMap.values());
         
-        const codeEls = clone.querySelectorAll('pre code, code');
+        const codeEls = clone.querySelectorAll('pre code');
         codeEls.forEach(codeEl => {
-          const pre = codeEl.closest('pre');
-          if (pre) {
-            const code = codeEl.textContent.trim();
-            if (code.length > 15) {
-              const classes = codeEl.className + ' ' + pre.className;
-              const langMatch = classes.match(/language-(\\w+)/);
-              const lang = langMatch ? langMatch[1] : '';
-              turn.codeBlocks.push({ lang, code });
-              pre.replaceWith(document.createTextNode(\`\\n\\n[CODE_BLOCK_\${turn.codeBlocks.length - 1}]\\n\\n\`));
-            }
+          const code = codeEl.textContent.trim();
+          if (code.length > 15) {
+            const classes = codeEl.className + ' ' + (codeEl.closest('pre')?.className || '');
+            const langMatch = classes.match(/language-(\\w+)/);
+            const lang = langMatch ? langMatch[1] : '';
+            const blockIdx = allCodeBlocks.length;
+            allCodeBlocks.push({ lang, code });
+            codeEl.closest('pre')?.replaceWith(document.createTextNode(\`\\n\\n[CODE_BLOCK_\${blockIdx}]\\n\\n\`));
           }
         });
         
-        turn.answer = clone.textContent.trim().replace(/\\n{3,}/g, '\\n\\n').replace(/\\[CODE_BLOCK_(\\d+)\\]/g, (match, idx) => {
-          const block = turn.codeBlocks[parseInt(idx)];
-          return block ? \`\\n\\\`\\\`\\\`\${block.lang}\\n\${block.code}\\n\\\`\\\`\\\`\\n\` : '';
-        });
-      }
+        let text = clone.textContent.trim().replace(/\\n{3,}/g, '\\n\\n');
+        if (text.length > 20) {
+          answerParts.push(text);
+        }
+      });
+      
+      turn.answer = answerParts.join('\\n\\n');
+      turn.answer = turn.answer.replace(/\\[CODE_BLOCK_(\\d+)\\]/g, (match, idx) => {
+        const block = allCodeBlocks[parseInt(idx)];
+        return block ? \`\\n\\\`\\\`\\\`\${block.lang}\\n\${block.code}\\n\\\`\\\`\\\`\\n\` : '';
+      });
+      
+      turn.citations = Array.from(allCitations.values());
+      turn.codeBlocks = allCodeBlocks;
+      
+      console.log('[DEBUG] Answer length:', turn.answer.length);
+      console.log('[DEBUG] Citations:', turn.citations.length);
+      console.log('[DEBUG] Code blocks:', turn.codeBlocks.length);
     }
     
     if (turn.query || turn.answer) {
@@ -607,6 +637,9 @@ After the complete list, add:
     }
   }
   
+  console.log('[DEBUG] Total turns extracted:', turns.length);
+  
+  say('Building markdown...');
   await delay(100);
   
   let md = '';
@@ -620,38 +653,61 @@ After the complete list, add:
     const turn = turns[i];
     
     if (turn.query) {
-      md += \`## 🧑 Query \${i + 1}\\n\\n\`;
+      md += \`## Query \${i + 1}\\n\\n\`;
       md += \`\${turn.query}\\n\\n\`;
     }
     
     if (turn.answer) {
-      md += \`## 🤖 Answer\\n\\n\`;
+      md += \`## Answer\\n\\n\`;
       md += \`\${turn.answer}\\n\\n\`;
     }
     
     if (turn.citations.length > 0) {
-      md += \`### 📚 Sources\\n\\n\`;
+      md += \`### Sources\\n\\n\`;
       turn.citations.forEach(cite => {
-        md += \`[\${cite.number}] \${cite.title}  \\n\`;
-        md += \`<\${cite.url}>\\n\\n\`;
+        md += \`**[\${cite.number}]** \${cite.title}  \\n\`;
+        md += \`\${cite.url}\\n\\n\`;
       });
     }
     
     md += '\\n---\\n\\n';
   }
   
-  md += \`\\n\\n*Exported with Aria Research Perplexity Exporter*\\n\`;
+  md += \`\\n*Exported with Aria Research Perplexity Exporter*\\n\`;
   
+  const totalChars = turns.reduce((sum, t) => sum + t.answer.length + t.query.length, 0);
+  console.log('[DEBUG] Total content characters:', totalChars);
+  
+  if (totalChars < 100) {
+    say('Very little content found\\n\\nMake sure you scrolled to\\nthe bottom and waited for\\ncontent to load.\\n\\nDownloading anyway...');
+    await delay(3000);
+  }
+  
+  say('Downloading...');
   await delay(200);
   
   const filename = \`Aria_Research_\${safeFilename(threadTitle)}.md\`;
   autoDownload(md, filename);
   
+  const totalSources = turns.reduce((a, t) => a + t.citations.length, 0);
+  const totalCode = turns.reduce((a, t) => a + t.codeBlocks.length, 0);
+  
+  say(\`Export complete\\n\\n\` +
+    \`\${turns.length} conversation\${turns.length !== 1 ? 's' : ''}\\n\` +
+    \`\${totalSources} source\${totalSources !== 1 ? 's' : ''}\\n\` +
+    \`\${totalCode} code block\${totalCode !== 1 ? 's' : ''}\\n\\n\` +
+    \`\${filename}\`,
+    true
+  );
+  
+  setTimeout(() => status.remove(), 6000);
+  
   return { 
     success: true, 
     filename, 
     turns: turns.length,
-    citations: turns.reduce((a, t) => a + t.citations.length, 0)
+    citations: totalSources,
+    codeBlocks: totalCode
   };
 })();`;
     
@@ -675,58 +731,8 @@ After the complete list, add:
       console.warn(`  Continuing despite eval failure: ${evalError.message}`);
     }
 
-    // ── STEP 8: Close All Tabs Before Stopping Instance ─────────────────────
-    console.log('Step 8: Closing all tabs to prevent RAM buildup on next restart...');
-    await logger.think(`🧹 Cleaning up browser tabs...`);
-    
-    try {
-      const tabs = await logger.logToolCall('listTabs', { instanceId: instance.id }, () =>
-        pinchTab.listTabs(instance.id)
-      );
-      
-      console.log(`  Found ${tabs.length} tabs to close`);
-      
-      if (tabs.length > 0) {
-        for (let i = 0; i < tabs.length; i++) {
-          const tab = tabs[i];
-          const currentTabId = tab.id || tab.tabId;
-          
-          if (currentTabId) {
-            console.log(`  Closing tab ${i + 1}/${tabs.length}: ${currentTabId}`);
-            try {
-              await logger.logToolCall('closeTab', { tabId: currentTabId }, async () => {
-                const authToken = await pinchTab['ensureAuthToken']();
-                const response = await fetch(`${pinchTab['baseUrl']}/tabs/${currentTabId}/close`, {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${authToken}`,
-                  },
-                });
-                if (!response.ok) {
-                  throw new Error(`Failed to close tab: ${response.status}`);
-                }
-                return response.json();
-              });
-              
-              // Small delay between tab closures to prevent race conditions
-              await logger.logToolCall('wait', { duration: 500 }, () =>
-                pinchTab.wait(500)
-              );
-            } catch (closeError) {
-              console.warn(`  Failed to close tab ${currentTabId}: ${closeError.message}`);
-            }
-          }
-        }
-        console.log('  ✅ All tabs closed');
-      } else {
-        console.log('  No tabs to close');
-      }
-    } catch (tabError) {
-      console.warn(`  Failed to list/close tabs: ${tabError.message}`);
-    }
-    
-    // ── STEP 9: Stop Browser Instance ────────────────────────────────────────
-    console.log('Step 9: Stopping browser instance (profile preserved)...');
+    // ── STEP 8: Stop Browser Instance ────────────────────────────────────────
+    console.log('Step 8: Stopping browser instance (profile preserved)...');
     await logger.think(`🛑 Stopping browser...`);
     
     if (profileId) {
@@ -739,10 +745,10 @@ After the complete list, add:
         pinchTab.wait(2000)
       );
       
-      console.log('  ✅ Browser instance stopped (login session preserved, tabs cleared)');
+      console.log('  ✅ Browser instance stopped (login session preserved, all tabs closed automatically)');
     }
 
-    // ── STEP 10: Generate Excel via OpenCode ─────────────────────────────────
+    // ── STEP 9: Generate Excel via OpenCode ─────────────────────────────────
     console.log('Step 10: Generating Excel file with OpenCode...');
     await logger.think(`📊 Now creating a professional Excel spreadsheet...`);
     await logger.think(`✨ OpenCode will read the markdown file and create the Excel`);

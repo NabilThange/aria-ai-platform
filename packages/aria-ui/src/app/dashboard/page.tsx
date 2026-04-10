@@ -1,32 +1,14 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import Image from "next/image";
 import { Header } from "@/components/layout/Header";
 import { ChatInput } from "@/components/messages/ChatInput";
 import { useRouter } from "next/navigation";
 import { startTask } from "@/utils/taskUtils";
-import { Model, ModelsResponse, GroupedModels } from "@/types";
+import { Model } from "@/types";
 import { TaskList } from "@/components/tasks/TaskList";
 import { logger } from "@/lib/logger";
-
-interface StockPhotoProps {
-  src: string;
-  alt?: string;
-}
-
-const StockPhoto: React.FC<StockPhotoProps> = ({
-  src,
-  alt = "Decorative image",
-}) => {
-  return (
-    <div className="h-full w-full overflow-hidden rounded-lg bg-white">
-      <div className="relative h-full w-full">
-        <Image src={src} alt={alt} fill className="object-cover" priority />
-      </div>
-    </div>
-  );
-};
+import { QRCodeModal } from "@/components/qr/QRCodeModal";
 
 interface FileWithBase64 {
   name: string;
@@ -39,6 +21,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<FileWithBase64[]>([]);
+  const [qrModalOpen, setQrModalOpen] = useState(false);
   const router = useRouter();
   const [activePopoverIndex, setActivePopoverIndex] = useState<number | null>(
     null,
@@ -170,11 +153,24 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Stock photo area - centered in its grid cell */}
+          {/* QR Code trigger area - centered in its grid cell */}
           <div className="flex items-center justify-center px-6 pt-6">
-            <div className="aspect-square h-full w-full max-w-md xl:max-w-2xl">
-              <StockPhoto src="/stock-1.png" alt="Aria stock image" />
-            </div>
+            <button
+              onClick={() => setQrModalOpen(true)}
+              className="group relative aspect-square h-full w-full max-w-md overflow-hidden rounded-lg bg-gradient-to-br from-pink-50 to-purple-50 transition-all hover:shadow-xl xl:max-w-2xl"
+            >
+              <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
+                <div className="text-6xl transition-transform group-hover:scale-110">🌸</div>
+                <div className="text-center">
+                  <h3 className="mb-2 text-2xl font-semibold text-gray-800">
+                    View Dashboard QR Code
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    Click to see an interactive 3D QR code
+                  </p>
+                </div>
+              </div>
+            </button>
           </div>
         </div>
 
@@ -208,6 +204,9 @@ export default function Home() {
           </div>
         </div>
       </main>
+
+      {/* QR Code Modal */}
+      <QRCodeModal open={qrModalOpen} onOpenChange={setQrModalOpen} />
     </div>
   );
 }
