@@ -679,6 +679,16 @@ export class PinchTabService {
   }
 
   /**
+   * Close a specific tab
+   * @param tabId - Tab ID to close
+   */
+  async closeTab(tabId: string): Promise<void> {
+    this.logger.debug(`Closing tab: ${tabId}`);
+    await this.request('POST', `/tabs/${tabId}/close`);
+    this.logger.log(`Tab closed: ${tabId}`);
+  }
+
+  /**
    * Set current instance (for switching between instances)
    */
   setCurrentInstance(instanceId: string): void {

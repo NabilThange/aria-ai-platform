@@ -21,7 +21,9 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:pinchtab": "jest --testPathPattern=pinchtab-simulation.test.ts --testTimeout=60000",
-    "test:pinchtab:simple": "ts-node test/pinchtab-simple-test.ts"
+    "test:pinchtab:simple": "ts-node test/pinchtab-simple-test.ts",
+    "db:clear": "ts-node scripts/clear-database.ts",
+    "db:clear:sql": "psql $DATABASE_URL -f scripts/clear-database.sql"
   },
   "dependencies": {
     "@bytebot/shared": "../shared",

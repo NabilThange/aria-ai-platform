@@ -662,10 +662,10 @@ EXAMPLE STRUCTURE:
     console.log('Step 11: Exporting complete conversation (research + LinkedIn post) via JavaScript eval...');
     
     const exportScript = `// ╔══════════════════════════════════════════════════════════════════╗
-// ║         ARIA RESEARCH — PERPLEXITY EXPORTER v4 (FIXED)          ║
-// ║              Handles Multiple Queries Correctly                  ║
+// ║         ARIA RESEARCH — PERPLEXITY EXPORTER v3                   ║
+// ║              Minimal • Centered • Design System                  ║
 // ╚══════════════════════════════════════════════════════════════════╝
-(async function exportPerplexityV4() {
+(async function exportPerplexityV3() {
   // ── Status Display (Minimal & Centered) ───────────────────────────
   const status = document.createElement('div');
   status.style.cssText = \`position: fixed;
@@ -726,25 +726,23 @@ EXAMPLE STRUCTURE:
   await delay(100);
   
   let threadTitle = 'perplexity_thread';
-  const firstH1 = document.querySelector('h1.group\\\\/query');
-  if (firstH1) {
-    threadTitle = firstH1.textContent.trim().substring(0, 100);
+  const h1 = document.querySelector('h1.group\\\\/query');
+  if (h1) {
+    threadTitle = h1.textContent.trim().substring(0, 100);
   } else {
     threadTitle = document.title.replace(/[-|] Perplexity.*/i, '').trim();
   }
   console.log('[DEBUG] Thread title:', threadTitle);
   
-  // ── Find ALL Queries (Not Just First One) ────────────────────────
+  // ── Find All Conversation Containers ──────────────────────────────
   say('Scanning conversation...');
   await delay(100);
   
-  // Find ALL h1 elements with query class - each represents a user query
-  const allQueryEls = Array.from(document.querySelectorAll('h1.group\\\\/query'));
-  console.log('[DEBUG] Found', allQueryEls.length, 'total queries');
+  const threadContainers = Array.from(document.querySelectorAll('.max-w-threadContentWidth'));
+  console.log('[DEBUG] Found', threadContainers.length, 'thread containers');
   
   const turns = [];
-  for (let qIdx = 0; qIdx < allQueryEls.length; qIdx++) {
-    const queryEl = allQueryEls[qIdx];
+  for (const container of threadContainers) {
     const turn = {
       query: '',
       answer: '',
@@ -752,52 +750,24 @@ EXAMPLE STRUCTURE:
       codeBlocks: []
     };
     
-    // Get query text
-    turn.query = queryEl.textContent.trim();
-    console.log(\`[DEBUG] Query \${qIdx + 1}:\`, turn.query.substring(0, 60) + '...');
-    
-    // Find the answer section AFTER this query
-    // Navigate up to find the parent container, then look for prose elements
-    let currentEl = queryEl;
-    let searchDepth = 0;
-    let answerContainer = null;
-    
-    // Go up the DOM tree to find a container
-    while (currentEl && searchDepth < 10) {
-      currentEl = currentEl.parentElement;
-      searchDepth++;
-      
-      // Look for the next sibling container that has prose elements
-      if (currentEl) {
-        let nextContainer = currentEl.nextElementSibling;
-        while (nextContainer && !nextContainer.querySelector('.prose')) {
-          nextContainer = nextContainer.nextElementSibling;
-          if (!nextContainer) break;
-          // Stop if we hit another query (means no answer for this query)
-          if (nextContainer.querySelector('h1.group\\\\/query')) {
-            break;
-          }
-        }
-        if (nextContainer && nextContainer.querySelector('.prose')) {
-          answerContainer = nextContainer;
-          break;
-        }
-      }
+    // Find query in this container
+    const queryEl = container.querySelector('h1.group\\\\/query');
+    if (queryEl) {
+      turn.query = queryEl.textContent.trim();
+      console.log('[DEBUG] Found query:', turn.query.substring(0, 50) + '...');
     }
     
-    console.log('[DEBUG] Answer container found:', !!answerContainer);
+    // Find ALL prose elements (answer parts)
+    const proseEls = container.querySelectorAll('.prose');
+    console.log('[DEBUG] Found', proseEls.length, 'prose elements in container');
     
-    if (answerContainer) {
-      // Find ALL prose elements in this answer
-      const proseEls = answerContainer.querySelectorAll('.prose');
-      console.log('[DEBUG] Found', proseEls.length, 'prose elements');
-      
+    if (proseEls.length > 0) {
       let answerParts = [];
       let allCitations = new Map();
       let allCodeBlocks = [];
       
       proseEls.forEach((proseEl, idx) => {
-        console.log('[DEBUG] Processing prose', idx, '- chars:', proseEl.textContent.length);
+        console.log('[DEBUG] Processing prose element', idx, '- length:', proseEl.textContent.length);
         const clone = proseEl.cloneNode(true);
         
         // Extract citations
@@ -807,7 +777,7 @@ EXAMPLE STRUCTURE:
           if (link) {
             const href = link.href;
             const text = cite.textContent.trim();
-            const num = text.match(/\\d+/)?.[0] || (allCitations.size + 1).toString();
+            const num = text.match(/\\d+/)?.[0] || allCitations.size + 1;
             if (!allCitations.has(num)) {
               allCitations.set(num, {
                 number: num,
@@ -854,12 +824,14 @@ EXAMPLE STRUCTURE:
       turn.citations = Array.from(allCitations.values());
       turn.codeBlocks = allCodeBlocks;
       
-      console.log('[DEBUG] Answer chars:', turn.answer.length);
+      console.log('[DEBUG] Answer length:', turn.answer.length);
       console.log('[DEBUG] Citations:', turn.citations.length);
       console.log('[DEBUG] Code blocks:', turn.codeBlocks.length);
     }
     
-    turns.push(turn);
+    if (turn.query || turn.answer) {
+      turns.push(turn);
+    }
   }
   
   console.log('[DEBUG] Total turns extracted:', turns.length);
@@ -1047,31 +1019,138 @@ EXAMPLE STRUCTURE:
       desktop.wait(500)
     );
 
-    // Prepare OpenCode prompt (autonomous, no user questions) - SINGLE LINE for better pasting
-    console.log('  Preparing OpenCode prompt (single line)...');
-    const opencodePrompt = `TASK: Find and read a markdown file from Perplexity, extract the LinkedIn post, and send it via webhook. 📚 FIRST: Read the skill documentation at: aria-linkedin-post/SKILL.md - This file contains complete instructions, correct syntax, error handling, and troubleshooting. QUICK SUMMARY (full details in SKILL.md): STEP 1: FIND THE MARKDOWN FILE - Search: /home/user/Desktop/ or /home/user/Downloads/ - Pattern: "Aria_Research_*.md" (created in last 5 minutes) - Command: find /home/user -name "Aria_Research_*.md" -type f -mmin -10. STEP 2: EXTRACT LINKEDIN POST - Find the LAST "## 🤖 Answer" section (this is the LinkedIn post) - Extract until "---" or end of file - Keep hashtags, emojis, and line breaks - MUST be under 2500 characters (truncate if longer) - See SKILL.md for Python/awk/sed examples. STEP 3: SEND TO N8N WEBHOOK - URL: ${webhookUrl} - Payload: {"post": "...", "topic": "${topic}"} - Use jq for proper JSON escaping (see SKILL.md) - Verify with "LINKEDIN_SUCCESS" message. ⚠️ FALLBACK HANDLING: 1. If NO file found: Create a short LinkedIn post about "${topic}" (under 2500 chars) and send it. 2. If file found but NO LinkedIn post section: Create a post from the research content (under 2500 chars). 3. If post is TOO LONG (>2500 chars): Truncate to 2400 chars and add "... [Read more]" at the end. 🎯 CHARACTER LIMIT: Post MUST be under 2500 characters - this is MANDATORY! ⚠️ CRITICAL INSTRUCTIONS: Read aria-linkedin-post/SKILL.md for complete instructions - Use the one-liner script from SKILL.md for best results - Follow error handling patterns from SKILL.md - Topic: "${topic}" - ALWAYS send something to the webhook, even if file is missing - DO NOT ask the user ANY questions - execute autonomously - DO NOT stop until the task is COMPLETE (file found, post extracted, webhook called) - If you encounter errors, retry with fallback strategies - Keep working until you successfully send the webhook request. Start by reading the SKILL.md file, then execute the workflow autonomously without stopping!`;
+    // Type "opencode" command
+    console.log('  Typing "opencode" command...');
+    await logger.logToolCall('launchOpenCode', { command: 'opencode' }, () =>
+      desktop.typeText('opencode', 0)
+    );
+    await logger.logToolCall('wait', { duration: 500 }, () =>
+      desktop.wait(500)
+    );
+    await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
+      desktop.pressKeys(['Return'])
+    );
 
+    // Wait 5 seconds for initial startup
+    console.log('  Waiting for OpenCode to initialize...');
+    await logger.logToolCall('wait', { duration: 5000 }, () =>
+      desktop.wait(5000)
+    );
+
+    // Wait for OpenCode to launch using vision AI
+    console.log('  Checking if OpenCode has launched...');
+    let opencodeReady = false;
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      console.log(`    Attempt ${attempt}/10: Checking OpenCode status...`);
+      
+      const screenshot = await logger.logToolCall('screenshot', {}, () =>
+        desktop.screenshot()
+      ) as { image: string; width: number; height: number };
+
+      const systemPrompt = `You are analyzing a terminal screenshot to detect if OpenCode CLI has launched.
+
+Look for these signs that OpenCode is READY:
+- An input box or text field (often with placeholder text)
+- Mode selector options or UI elements
+- Keyboard shortcut hints at the bottom
+- The word "OpenCode" or "opencode" visible in the UI
+- Interactive interface (not just a bash prompt)
+
+Look for these signs that it's NOT ready:
+- Plain bash prompt ($ or user@hostname)
+- "command not found" error
+- Still loading or blank screen
+
+Reply with ONLY one word: READY, LOADING, or ERROR`;
+
+      const userPrompt = 'Is OpenCode fully launched and ready for input?';
+      
+      try {
+        const verdict = await callGroqVision(systemPrompt, userPrompt, screenshot.image);
+        const status = verdict.trim().toUpperCase();
+        
+        console.log(`    Status: ${status}`);
+        
+        if (status.includes('READY')) {
+          console.log('  ✅ OpenCode is ready!');
+          opencodeReady = true;
+          break;
+        } else if (status.includes('ERROR')) {
+          console.log('  ❌ OpenCode command failed!');
+          throw new Error('OpenCode command not found or failed to launch');
+        }
+      } catch (error) {
+        console.warn(`    Vision check failed: ${error.message}`);
+      }
+      
+      // Wait before next check
+      await logger.logToolCall('wait', { duration: 5000 }, () =>
+        desktop.wait(5000)
+      );
+    }
+
+    if (!opencodeReady) {
+      throw new Error('OpenCode did not launch within timeout period');
+    }
+
+    // Extra safety wait
+    await logger.logToolCall('wait', { duration: 3000 }, () =>
+      desktop.wait(3000)
+    );
+
+    // Paste OpenCode prompt using Ctrl+Shift+V
+    console.log('  Pasting OpenCode prompt with Ctrl+Shift+V...');
+    const opencodePrompt = `TASK: Find and read a markdown file from Perplexity, extract the LinkedIn post, and send it via webhook.
+
+📚 FIRST: Read the skill documentation at: aria-linkedin-post/SKILL.md
+This file contains complete instructions, correct syntax, error handling, and troubleshooting.
+
+QUICK SUMMARY (full details in SKILL.md):
+
+STEP 1: FIND THE MARKDOWN FILE
+- Search: /home/user/Desktop/ or /home/user/Downloads/
+- Pattern: "Aria_Research_*.md" (created in last 5 minutes)
+- Command: find /home/user -name "Aria_Research_*.md" -type f -mmin -10
+
+STEP 2: EXTRACT LINKEDIN POST
+- Find the LAST "## 🤖 Answer" section (this is the LinkedIn post)
+- Extract until "---" or end of file
+- Keep hashtags, emojis, and line breaks
+- MUST be under 2500 characters (truncate if longer)
+- See SKILL.md for Python/awk/sed examples
+
+STEP 3: SEND TO N8N WEBHOOK
+- URL: ${webhookUrl}
+- Payload: {"post": "...", "topic": "${topic}"}
+- Use jq for proper JSON escaping (see SKILL.md)
+- Verify with "LINKEDIN_SUCCESS" message
+
+⚠️ FALLBACK HANDLING:
+1. If NO file found: Create a short LinkedIn post about "${topic}" (under 2500 chars) and send it
+2. If file found but NO LinkedIn post section: Create a post from the research content (under 2500 chars)
+3. If post is TOO LONG (>2500 chars): Truncate to 2400 chars and add "... [Read more]" at the end
+
+🎯 CHARACTER LIMIT: Post MUST be under 2500 characters - this is MANDATORY!
+
+⚠️ IMPORTANT:
+- Read aria-linkedin-post/SKILL.md for complete instructions
+- Use the one-liner script from SKILL.md for best results
+- Follow error handling patterns from SKILL.md
+- Topic: "${topic}"
+- ALWAYS send something to the webhook, even if file is missing
+
+Start by reading the SKILL.md file, then execute the workflow!`;
     
-    // STEP 1: Type "opencode run '" (opening single quote - protects special chars)
-    console.log('  Step 1: Typing "opencode run \'" command...');
-    await logger.logToolCall('typeText', { text: "opencode run '" }, () =>
-      desktop.typeText("opencode run '", 0)
+    // Copy to clipboard first
+    await logger.logToolCall('pasteText', { text: opencodePrompt }, () =>
+      desktop.pasteText(opencodePrompt)
     );
     await logger.logToolCall('wait', { duration: 500 }, () =>
       desktop.wait(500)
     );
     
-    // STEP 2: Copy prompt to clipboard
-    console.log('  Step 2: Copying prompt to clipboard...');
-    await logger.logToolCall('pasteText', { text: opencodePrompt }, () =>
-      desktop.pasteText(opencodePrompt)
-    );
-    await logger.logToolCall('wait', { duration: 300 }, () =>
-      desktop.wait(300)
-    );
-    
-    // STEP 3: Paste from clipboard with Ctrl+Shift+V
-    console.log('  Step 3: Pasting prompt with Ctrl+Shift+V...');
+    // Use Ctrl+Shift+V to paste in terminal
+    console.log('  Pressing Ctrl+Shift+V to paste...');
     await logger.logToolCall('pressKeys', { keys: ['Control', 'Shift', 'v'] }, () =>
       desktop.pressKeys(['Control', 'Shift', 'v'])
     );
@@ -1079,41 +1158,23 @@ EXAMPLE STRUCTURE:
       desktop.wait(1000)
     );
     
-    // STEP 4: Press Enter to accept autocomplete/paste
-    console.log('  Step 4: Pressing Enter to accept paste...');
-    await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
-      desktop.pressKeys(['Return'])
-    );
-    await logger.logToolCall('wait', { duration: 500 }, () =>
-      desktop.wait(500)
-    );
-    
-    // STEP 5: Type closing single quote
-    console.log('  Step 5: Typing closing single quote...');
-    await logger.logToolCall('typeText', { text: "'" }, () =>
-      desktop.typeText("'", 0)
-    );
-    await logger.logToolCall('wait', { duration: 300 }, () =>
-      desktop.wait(300)
-    );
-    
-    // STEP 6: Press Enter to execute the command
-    console.log('  Step 6: Pressing Enter to execute OpenCode...');
+    // Press Enter to send the prompt
+    console.log('  Pressing Enter to send prompt...');
     await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
       desktop.pressKeys(['Return'])
     );
 
-    console.log('✅ OpenCode command sent - workflow complete!');
-    console.log('   OpenCode will process the task autonomously in the background.');
+    console.log('✅ OpenCode prompt sent - workflow complete!');
+    console.log('   OpenCode will process the task in the background.');
 
     // ── RETURN RESULT ─────────────────────────────────────────────────────────
     return {
       success: true,
-      message: `LinkedIn post workflow initiated for "${topic}". OpenCode is processing the task autonomously.`,
+      message: `LinkedIn post workflow initiated for "${topic}". OpenCode is processing the task.`,
       data: {
         topic,
         status: 'opencode_processing',
-        note: 'OpenCode will find the markdown file, extract the LinkedIn post, and send it to the webhook automatically without user interaction.',
+        note: 'OpenCode will find the markdown file, extract the LinkedIn post, and send it to the webhook automatically.',
       },
     };
 

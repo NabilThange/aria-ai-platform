@@ -748,119 +748,220 @@ After the complete list, add:
       console.log('  ✅ Browser instance stopped (login session preserved, all tabs closed automatically)');
     }
 
-    // ── STEP 9: Generate Excel via OpenCode ─────────────────────────────────
-    console.log('Step 10: Generating Excel file with OpenCode...');
+    // ── STEP 9: Generate Excel via OpenCode ──────────────────────────────────
+    console.log('Step 9: Generating Excel file and sending email with OpenCode...');
     await logger.think(`📊 Now creating a professional Excel spreadsheet...`);
-    await logger.think(`✨ OpenCode will read the markdown file and create the Excel`);
+    await logger.think(`✨ OpenCode will read the markdown file, create Excel, and email it to you`);
+
+    // Open terminal
+    await logger.logToolCall('launchApplication', { application: 'terminal' }, () =>
+      desktop.launchApplication('terminal')
+    );
+    await logger.logToolCall('wait', { duration: 3000 }, () =>
+      desktop.wait(3000)
+    );
+
+    // Click terminal to ensure focus
+    await logger.logToolCall('clickMouse', { coordinates: { x: 640, y: 400 }, button: 'left' }, () =>
+      desktop.clickMouse({ x: 640, y: 400 }, 'left')
+    );
+    await logger.logToolCall('wait', { duration: 500 }, () =>
+      desktop.wait(500)
+    );
+
+    // Maximize terminal (F11)
+    console.log('  Maximizing terminal to fullscreen...');
+    await logger.logToolCall('pressKeys', { keys: ['F11'] }, () =>
+      desktop.pressKeys(['F11'])
+    );
+    await logger.logToolCall('wait', { duration: 1000 }, () =>
+      desktop.wait(1000)
+    );
+
+    // Change to Desktop directory
+    console.log('  Changing to Desktop directory...');
+    await logger.logToolCall('changeDirectory', { path: '/home/user/Desktop/' }, () =>
+      desktop.typeText('cd /home/user/Desktop/', 0)
+    );
+    await logger.logToolCall('wait', { duration: 300 }, () =>
+      desktop.wait(300)
+    );
+    await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
+      desktop.pressKeys(['Return'])
+    );
+    await logger.logToolCall('wait', { duration: 500 }, () =>
+      desktop.wait(500)
+    );
 
     const filename = `${businessType.replace(/\s+/g, '-')}-${city}-research.xlsx`;
     
-    const opencodePrompt = `I need you to create an Excel spreadsheet from Perplexity research data about ${businessType} in ${city}.
+    const opencodePrompt = `TASK: Create Excel spreadsheet from Perplexity research and email it with the markdown file.
 
-STEP 1: FIND THE MARKDOWN FILE
-- Search for a .md file (markdown file) that was just downloaded from Perplexity
-- Check these locations in order:
-  1. /home/user/Desktop/
-  2. /home/user/Downloads/
-  3. /home/user/Documents/
-  4. Current directory (pwd)
-- Use commands like:
-  - ls -lt /home/user/Desktop/*.md | head -5
-  - ls -lt /home/user/Downloads/*.md | head -5
-  - find /home/user -name "*.md" -type f -mmin -30
-- The file was created in the last few minutes
-- File name will be something like "Aria_Research_*.md" or "perplexity_*.md"
-- Look for the MOST RECENT .md file
+📚 FIRST: Read the skill documentation at: aria-mail/SKILL.md and aria-excel/SKILL.md
+These files contain complete instructions for email and Excel operations.
 
-STEP 2: READ THE MARKDOWN FILE
-- Read the entire markdown file you found
-- The file contains:
-  - User's research query about ${businessType} in ${city}
-  - Perplexity's response with business data
-  - Each business has: Name, Address, Phone, Website, Rating, Description, Hours, Services
+🎯 YOUR MISSION (DO NOT STOP UNTIL ALL STEPS ARE COMPLETE):
 
-STEP 3: EXTRACT BUSINESS DATA
-- Parse Perplexity's response section (after "## 🤖 Answer" or "## 🔵 Perplexity:")
-- Extract all business entries
-- Each business should have these fields:
-  - Business Name
-  - Address (full street address with city, state, ZIP)
-  - Phone (with country code if available)
-  - Website (full URL)
-  - Rating (out of 5 stars)
-  - Description (what they offer, specialties)
-  - Hours (business hours)
-  - Services (key services/products)
+STEP 1: FIND THE MARKDOWN FILE (MOST RECENT) [First Try Downloads Folder]
+- Search locations: /home/user/Desktop/, /home/user/Downloads/, /home/user/Documents/
+- Commands to try:
+  \`\`\`bash
+  # Find most recent .md file
+  find /home/user -name "*.md" -type f -mmin -30 -exec ls -lt {} + | head -1
+  find /home/user/Desktop -name "*.md" -type f -mmin -30
+  find /home/user/Downloads -name "*.md" -type f -mmin -30
+  ls -lt /home/user/Desktop/*.md 2>/dev/null | head -1
+  ls -lt /home/user/Downloads/*.md 2>/dev/null | head -1
+  \`\`\`
+- Look for: "Aria_Research_*.md" or any .md file created in last 30 minutes
+- Store the file path in a variable: MD_FILE="/path/to/file.md"
 
-STEP 4: CREATE EXCEL FILE
+STEP 2: READ AND PARSE THE MARKDOWN FILE
+- Read the entire file: \`cat "$MD_FILE"\`
+- Extract business data from the "## 🤖 Answer" or "## Answer" section
+- Each business has: Name, Address, Phone, Website, Rating, Description, Hours, Services
+- Parse all ${maxResults} businesses from the markdown
+
+STEP 3: CREATE EXCEL FILE
 - Filename: ${filename}
 - Save to: /home/user/Desktop/${filename}
-- Column headers: Business Name | Address | Phone | Website | Rating | Description | Hours | Services
-- One row per business
-- Auto-fit column widths
-- Header row with bold formatting and light blue background
-- Alternate row colors (white/light gray) for readability
-- Professional styling with borders
+- Use Python with openpyxl or pandas:
+  \`\`\`python
+  import pandas as pd
+  from openpyxl import load_workbook
+  from openpyxl.styles import Font, PatternFill, Alignment
+  
+  # Create DataFrame with business data
+  data = {
+      'Business Name': [...],
+      'Address': [...],
+      'Phone': [...],
+      'Website': [...],
+      'Rating': [...],
+      'Description': [...],
+      'Hours': [...],
+      'Services': [...]
+  }
+  df = pd.DataFrame(data)
+  
+  # Save to Excel
+  excel_path = '/home/user/Desktop/${filename}'
+  df.to_excel(excel_path, index=False, sheet_name='${businessType}')
+  
+  # Apply formatting
+  wb = load_workbook(excel_path)
+  ws = wb.active
+  
+  # Header formatting
+  header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+  header_font = Font(bold=True, color='FFFFFF')
+  for cell in ws[1]:
+      cell.fill = header_fill
+      cell.font = header_font
+      cell.alignment = Alignment(horizontal='center', vertical='center')
+  
+  # Auto-fit columns
+  for column in ws.columns:
+      max_length = 0
+      column_letter = column[0].column_letter
+      for cell in column:
+          if cell.value:
+              max_length = max(max_length, len(str(cell.value)))
+      ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+  
+  wb.save(excel_path)
+  print(f"✅ Excel file created: {excel_path}")
+  \`\`\`
 
-STEP 5: SEND EMAIL
-- Read SKILLS.MD for aria-mail instructions
-- Send the Excel file (${filename}) as an attachment
-- Email will be sent to the recipient automatically (already configured)
-- Email subject: "${businessType} in ${city} - Research Results"
-- Email body: "Hi! Here's the research you requested for ${businessType} in ${city}. I found detailed information on ${maxResults} businesses including contact details, ratings, and services. The data is organized in an Excel spreadsheet for easy reference. Best regards, Aria"
+STEP 4: VERIFY FILES EXIST
+- Check Excel file: \`ls -lh /home/user/Desktop/${filename}\`
+- Check Markdown file: \`ls -lh "$MD_FILE"\`
+- If either file is missing, STOP and report error
 
-IMPORTANT NOTES:
-- Do NOT search the web for new data
-- Use ONLY the data from the markdown file you find
-- Search ALL common locations (Desktop, Downloads, Documents)
-- Use 'find' command if you can't locate the file
-- Make sure all businesses from the markdown are included in the Excel file`;
+STEP 5: SEND EMAIL WITH BOTH ATTACHMENTS
+- Read aria-mail/SKILL.md for correct email syntax
+- Recipient: ${recipientEmail}
+- Subject: "${businessType} in ${city} - Research Results"
+- Body: "Hi!\\n\\nHere's the research you requested for ${businessType} in ${city}.\\n\\nI found detailed information on ${maxResults} businesses including:\\n- Contact details (phone, website, address)\\n- Ratings and reviews\\n- Services offered\\n- Business hours\\n\\nAttached files:\\n1. ${filename} - Excel spreadsheet with organized data\\n2. [markdown filename] - Full research with sources\\n\\nBest regards,\\nAria"
+- Attachments: /home/user/Desktop/${filename} AND $MD_FILE
+- Use the email command from SKILL.md (likely n8n webhook or mail command)
+- Example:
+  \`\`\`bash
+  # Send email with attachments
+  curl -X POST https://n8n-render-tpfk.onrender.com/webhook/aria-mail \\
+    -F "to=${recipientEmail}" \\
+    -F "subject=${businessType} in ${city} - Research Results" \\
+    -F "body=Hi! Here's the research..." \\
+    -F "attachment1=@/home/user/Desktop/${filename}" \\
+    -F "attachment2=@$MD_FILE"
+  \`\`\`
 
-    // Import and execute opencode-request workflow
-    const opencodeWorkflow = await import('./opencode-request.workflow');
-    const excelResult = await logger.logToolCall(
-      'opencode-request',
-      { userRequest: opencodePrompt, emailRecipients: recipientEmail },
-      () => opencodeWorkflow.execute({
-        userRequest: opencodePrompt,
-        emailRecipients: recipientEmail, // Pass email to opencode workflow
-      }, services)
+STEP 6: VERIFY EMAIL SENT
+- Check for success response from email command
+- Print confirmation: "✅ EMAIL SENT SUCCESSFULLY to ${recipientEmail}"
+- If email fails, retry once with error details
+
+⚠️ CRITICAL INSTRUCTIONS:
+- DO NOT ask me ANY questions - execute autonomously
+- DO NOT stop until ALL steps are complete (find file → create Excel → send email)
+- If you encounter errors, try alternative approaches (different Python libraries, different file locations)
+- ALWAYS send BOTH files (Excel + Markdown) as attachments
+- Verify each step before moving to the next
+- Print clear status messages for each step
+- If email fails, try alternative email methods from SKILL.md
+- Keep working until you see "✅ EMAIL SENT SUCCESSFULLY"
+
+🎯 SUCCESS CRITERIA:
+1. ✅ Markdown file found and read
+2. ✅ Excel file created at /home/user/Desktop/${filename}
+3. ✅ Email sent to ${recipientEmail} with BOTH attachments
+4. ✅ Confirmation message printed
+
+Start by reading aria-mail/SKILL.md and aria-excel/SKILL.md, then execute ALL steps autonomously!`;
+
+    // Prepare the full command
+    console.log('  Preparing "opencode run" command with prompt...');
+    const fullCommand = `opencode run "${opencodePrompt.replace(/"/g, '\\"')}"`;
+    
+    // Copy to clipboard
+    await logger.logToolCall('pasteText', { text: fullCommand }, () =>
+      desktop.pasteText(fullCommand)
+    );
+    await logger.logToolCall('wait', { duration: 500 }, () =>
+      desktop.wait(500)
+    );
+    
+    // Paste into terminal with Ctrl+Shift+V
+    console.log('  Pasting command into terminal with Ctrl+Shift+V...');
+    await logger.logToolCall('pressKeys', { keys: ['Control', 'Shift', 'v'] }, () =>
+      desktop.pressKeys(['Control', 'Shift', 'v'])
+    );
+    await logger.logToolCall('wait', { duration: 500 }, () =>
+      desktop.wait(500)
+    );
+    
+    // Press Enter to execute
+    console.log('  Pressing Enter to execute OpenCode...');
+    await logger.logToolCall('pressKeys', { keys: ['Return'] }, () =>
+      desktop.pressKeys(['Return'])
     );
 
-    if (!excelResult.success) {
-      console.log(`⚠️ OpenCode failed: ${excelResult.error}`);
-      await logger.think(`⚠️ Hmm, something went wrong with OpenCode...`);
-      
-      return {
-        success: false,
-        message: `Research completed but Excel generation and email failed: ${excelResult.error}`,
-        data: {
-          businessType,
-          city,
-          maxResults,
-          emailSent: false,
-          excelGenerated: false,
-        },
-      };
-    }
-
-    console.log(`✅ OpenCode completed successfully`);
-    await logger.think(`✅ Perfect! Excel file created and emailed!`);
-    await logger.think(`📧 Check your inbox at ${recipientEmail}`);
-    await logger.think(`🎉 All done! You should have a nice spreadsheet with the research results`);
+    console.log('✅ OpenCode command sent - workflow complete!');
+    console.log('   OpenCode will process the task autonomously in the background.');
+    await logger.think(`✅ OpenCode is working on it! You'll receive the email shortly at ${recipientEmail}`);
 
     // ── RETURN SUCCESS ───────────────────────────────────────────────────────
     return {
       success: true,
-      message: `Research completed. Found ${maxResults} ${businessType} in ${city}. Excel file sent to ${recipientEmail}`,
+      message: `Research completed for ${maxResults} ${businessType} in ${city}. OpenCode is creating Excel and sending email to ${recipientEmail}`,
       data: {
         businessType,
         city,
         maxResults,
         filename,
         recipientEmail,
-        excelGenerated: true,
-        emailSent: true,
+        status: 'opencode_processing',
+        note: 'OpenCode will create the Excel file and email it with the research markdown file automatically.',
       },
     };
 

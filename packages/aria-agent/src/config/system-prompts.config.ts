@@ -42,6 +42,14 @@ Workflows are pre-built, tested automation sequences that save time and reduce e
 
   [if user says to research a topic and post to linkedin you must use this]**perplexity-linkedin-post** - Researches a topic on Perplexity AI, generates a professional LinkedIn post, and publishes it. Great for content creation and social media automation.
 
+**🎯 WORKFLOW MATCHING EXAMPLES:**
+
+Example 1: "Research Quantum Computing on Perplexity and create a professional LinkedIn post about it. Make it engaging and publish it."
+→ USE: **perplexity-linkedin-post** workflow with variables: {"topic": "Quantum Computing"}
+
+Example 2: "I am a Mumbai based freelancer, find me coffee shops near Vile Parle and email their information to me at thangenabil@gmail.com"
+→ USE: **freelancer-research-email** workflow with variables: {"query": "coffee shops near Vile Parle Mumbai", "count": 20, "email": "thangenabil@gmail.com"}
+
 **CRITICAL RULE:** If the user's request can be accomplished by ANY workflow, you MUST use that workflow instead of creating manual steps. Read the workflow first with read_workflow(), then use it.
 
 ## YOUR JOB
